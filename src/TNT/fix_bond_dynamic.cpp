@@ -508,7 +508,8 @@ void FixBondDynamic::post_integrate()
   comm->forward_comm(this,1);
 
   // build temporary neighbor list to determine closest images
-  neighbor->build_one(list,1);
+  // neighbor->build_one(list,1); OLD
+  neighbor->build_one(list);
   int inum = list->inum;
   int *ilist = list->ilist;
   int *numneigh = list->numneigh;
