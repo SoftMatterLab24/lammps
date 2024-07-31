@@ -369,11 +369,13 @@ void FixBondDynamic::post_integrate()
         double rsq = delx*delx + dely*dely + delz*delz;
 
         // Find force in bond
-        double fbond;
+        double fbond; // fbond is returned as f/r
         double engpot = bond->single(btype,rsq,i,j,fbond);
+        double r = sqrt(rsq);
+        double bondforce = fabs(fbond)*r;
 
         // Modify kd using Bell's law
-        double kd_bell = kd*exp(fabs(fbond)/f0);
+        double kd_bell = kd*exp(fabs(bondforce)/f0);
         p_detach = 1 - exp(-kd_bell*DT_EQ);
       }
       if (flag_catch) {
@@ -386,13 +388,14 @@ void FixBondDynamic::post_integrate()
         double rsq = delx*delx + dely*dely + delz*delz;
 
         // Find force in bond
-        double fbond;
-        double bondforce = fabs(fbond)*delx;
+        double fbond; // fbond is returned as f/r
         double engpot = bond->single(btype,rsq,i,j,fbond);
+        double r = sqrt(rsq);
+        double bondforce = fabs(fbond)*r; 
 
         // Modify kd using two-path catch model
         // kd = slip + catch
-        double kd_catch = kd*exp(fabs(fbond*delx)/fs0) + kd*kc0_scale*exp(-fabs(fbond*delx)/fc0);
+        double kd_catch = kd*exp(fabs(bondforce)/fs0) + kd*kc0_scale*exp(-fabs(bondforce)/fc0);
         //printf("kd_catch %4.4f\n",kd_catch);
         //printf("fbond %4.4f\n",fbond);
         //printf("fs0 %4.4f\n",fs0);
