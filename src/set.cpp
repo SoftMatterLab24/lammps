@@ -42,9 +42,9 @@
 using namespace LAMMPS_NS;
 using namespace MathConst;
 
-enum{ATOM_SELECT,MOL_SELECT,TYPE_SELECT,GROUP_SELECT,REGION_SELECT};
+enum{ATOM_SELECT,MOL_SELECT,BOND_SELECT,TYPE_SELECT,GROUP_SELECT,REGION_SELECT};
 
-enum{TYPE,TYPE_FRACTION,TYPE_RATIO,TYPE_SUBSET,
+enum{TYPE,TYPE_FRACTION,BOND_FRACTION,TYPE_RATIO,TYPE_SUBSET,
      MOLECULE,X,Y,Z,VX,VY,VZ,CHARGE,MASS,SHAPE,LENGTH,TRI,
      DIPOLE,DIPOLE_RANDOM,SPIN_ATOM,SPIN_RANDOM,SPIN_ELECTRON,RADIUS_ELECTRON,
      QUAT,QUAT_RANDOM,THETA,THETA_RANDOM,ANGMOM,OMEGA,TEMPERATURE,
@@ -66,6 +66,7 @@ void Set::command(int narg, char **arg)
 
   if (strcmp(arg[0],"atom") == 0) style = ATOM_SELECT;
   else if (strcmp(arg[0],"mol") == 0) style = MOL_SELECT;
+  else if (strcmp(arg[0],"bond") == 0) style = BOND_SELECT;
   else if (strcmp(arg[0],"type") == 0) style = TYPE_SELECT;
   else if (strcmp(arg[0],"group") == 0) style = GROUP_SELECT;
   else if (strcmp(arg[0],"region") == 0) style = REGION_SELECT;
@@ -107,6 +108,20 @@ void Set::command(int narg, char **arg)
       if (ivalue <= 0)
         error->all(FLERR,"Invalid random number seed {} in set type/fraction command", ivalue);
       setrandom(TYPE_FRACTION);
+      iarg += 4; 
+      
+    } else if (strcmp(arg[iarg],"bond/fraction") == 0) {
+      if (iarg+4 > narg) utils::missing_cmd_args(FLERR, "set bond/fraction", error);
+      newtype = utils::expand_type_int(FLERR, arg[iarg+1], Atom::ATOM, lmp);
+      fraction = utils::numeric(FLERR, arg[iarg+2], false, lmp);
+      ivalue = utils::inumeric(FLERR, arg[iarg+3], false, lmp);
+      if (newtype <= 0 || newtype > atom->nbondtypes)
+        error->all(FLERR,"Invalid type value {} in set bond/fraction command", newtype);
+      if (fraction < 0.0 || fraction > 1.0)
+        error->all(FLERR,"Invalid fraction value {} in set bond/fraction command", fraction);
+      if (ivalue <= 0)
+        error->all(FLERR,"Invalid random number seed {} in set bond/fraction command", ivalue);
+      setrandom(BOND_FRACTION);
       iarg += 4;
 
     } else if (strcmp(arg[iarg],"type/ratio") == 0) {
@@ -725,7 +740,7 @@ void Set::command(int narg, char **arg)
 }
 
 /* ----------------------------------------------------------------------
-   select atoms according to ATOM, MOLECULE, TYPE, GROUP, REGION style
+   select atoms according to ATOM, MOLECULE, BOND, TYPE, GROUP, REGION style
    n = nlocal or nlocal+nghost depending on keyword
 ------------------------------------------------------------------------- */
 
@@ -756,6 +771,21 @@ void Set::selection(int n)
     for (int i = 0; i < n; i++)
       if (molecule[i] >= nlobig && molecule[i] <= nhibig) select[i] = 1;
       else select[i] = 0;
+
+
+  } else if (style == BOND_SELECT) {
+  //  UPDATE LATER TO ONLY WORK WITH SPECIFIED BOND TYPE
+  //  int nlocal = atom->nlocal;
+  //  int *num_bond = atom->num_bond;
+  //  int **bond_type = atom->bond_type;
+  //  
+  //  for (int i = 0; i < n; i++)
+  //    for 
+
+    //int  nlocal = atom->nlocal;
+    //int *num_bond = atom->num_bond;
+    //int **bond_type = atom->bond_type;
+    //int n = num_bond[i];
 
   } else if (style == TYPE_SELECT) {
     utils::bounds_typelabel(FLERR,id,1,atom->ntypes,nlo,nhi,lmp,Atom::ATOM);
@@ -1216,6 +1246,22 @@ void Set::setrandom(int keyword)
         atom->type[i] = newtype;
         count++;
       }
+
+  // set approx fraction of bond types to newtype
+
+  } else if (keyword == BOND_FRACTION) {
+    int  nlocal = atom->nlocal;
+    int *num_bond = atom->num_bond;
+    int **bond_type = atom->bond_type;
+    int n = num_bond[i];
+
+    for (i = 0; i < nlocal; i++)
+      for (int m = 0; m < n; m++)
+        if (select[i]) {
+          if (ranmars->uniform() > fraction) continue;
+          atom->bond_type[i][m] = newtype;
+          count++;
+        }
 
   // set exact count of atom types to newtype
   // for TYPE_RATIO, exact = fraction out of total eligible
