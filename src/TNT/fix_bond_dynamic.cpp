@@ -328,7 +328,7 @@ void FixBondDynamic::post_integrate()
 
     // Skip atoms not in the desired group or of the wrong type
     if (!(mask[i] & groupbit)) continue;
-    if ((type[i] != iatomtype) && (type[i] != jatomtype)) continue;
+    //if ((type[i] != iatomtype) && (type[i] != jatomtype)) continue;  //### TEMP (too restrictive)
 
     // Loop through each entry of fbd
     for (int b = 0; b < maxbond; b++) {
@@ -341,13 +341,13 @@ void FixBondDynamic::post_integrate()
 
       // Local id of current bond pair
       int j = atom->map(tagj);
-      if (j < 0)
-        error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
-                    "from further away");
+      if (j < 0) continue;
+        error->one(FLERR,"Fix bond/dynamic needs ghost atoms "    //### TEMP  
+                    "from further away 1");
 
       // Skip atoms not in the desired group or of the wrong type
       if (!(mask[j] & groupbit)) continue;
-      if ((type[j] != iatomtype) && (type[j] != jatomtype)) continue;
+      //if ((type[j] != iatomtype) && (type[j] != jatomtype)) continue; //### TEMP (too restrictive)
 
       // Only consider each bond once - when my atom has the lower atom tag
       if (tag[i] > tagj) continue;
@@ -760,7 +760,7 @@ void FixBondDynamic::post_integrate()
       int j = atom->map(tagj);
       if (j < 0)
         error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
-                    "from further away");
+                    "from further away 2");
 
       // find where this bond is in atom j's list
       // if its location is past npos[j], then this was unsuccessful
@@ -848,7 +848,7 @@ void FixBondDynamic::post_integrate()
 
       if (j < 0)
         error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
-                    "from further away");
+                    "from further away 3");
 
       // do not allow a duplicate bond to be created
       // check fbd entry of atom i
@@ -1070,7 +1070,7 @@ void FixBondDynamic::update_topology()
 
       if (i1 < 0 || i2 < 0) {
         error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
-                    "from further away");
+                    "from further away 4");
       }
 
       // Loop through atoms of owned atoms i j
@@ -1113,7 +1113,7 @@ void FixBondDynamic::update_topology()
 
       if (i1 < 0 || i2 < 0) {
         error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
-                    "from further away");
+                    "from further away 5");
       }
 
       // Loop through atoms of owned atoms i j
