@@ -341,9 +341,9 @@ void FixBondDynamic::post_integrate()
 
       // Local id of current bond pair
       int j = atom->map(tagj);
-      if (j < 0) continue;
-        error->one(FLERR,"Fix bond/dynamic needs ghost atoms "    //### TEMP  
-                    "from further away 1");
+      //if (j < 0) continue;
+      //  error->one(FLERR,"Fix bond/dynamic needs ghost atoms "    //### TEMP  
+      //              "from further away 1");
 
       // Skip atoms not in the desired group or of the wrong type
       if (!(mask[j] & groupbit)) continue;
