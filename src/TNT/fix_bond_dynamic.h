@@ -59,7 +59,7 @@ class FixBondDynamic : public Fix {
   double prob_attach, prob_detach;
 
   // Force sensitivity for flag_bell
-  double f0;
+  double f0, kmax;
 
   // Force sensitivities for flag_catch
   double fs0, fc0, kc0_scale;

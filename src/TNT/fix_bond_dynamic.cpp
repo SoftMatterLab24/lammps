@@ -101,8 +101,9 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
     } else if (strcmp(arg[iarg],"bell") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
       f0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+      kmax = utils::numeric(FLERR,arg[iarg+2],false,lmp);
       flag_bell = 1;
-      iarg += 2;
+      iarg += 3;
     } else if (strcmp(arg[iarg],"catch") == 0) {
       if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
       fs0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
@@ -335,11 +336,6 @@ void FixBondDynamic::post_integrate()
   //int size = sizeof(bond_type_raw);
   //printf("%i\n\n",size);
 
-  //printf("%i\n\n",bondlist[0][2]);
-  //printf("%i\n\n",bondlist[1][2]);
-  //printf("%i\n\n",bondlist[2][2]);
-  
-
   for (int i = 0; i < nlocal; i++) {
 
     // Skip atoms not in the desired group or of the wrong type
@@ -367,11 +363,7 @@ void FixBondDynamic::post_integrate()
       for (int n = 0; n < nbondlist; n++) {
         int iatom = bondlist[n][0];
         int jatom = bondlist[n][1];
-        //printf("n:%i bondtype: %i \n",n,bondtype);
-        //printf("iatom:%i \n",tag[iatom]);
-        //printf("jatom:%i \n",tag[jatom]);
-        //printf("tagi:%i \n",tag[i]);
-        //printf("tagj:%i \n\n",tagj);
+
         if((tag[iatom]==tag[i] and tag[jatom]==tagj) || (tag[iatom]==tagj and tag[jatom]==tag[i])) {
           bondtype = bondlist[n][2];
           break;
@@ -417,8 +409,8 @@ void FixBondDynamic::post_integrate()
         double r = sqrt(rsq);
         double bondforce = fabs(fbond)*r;
 
-        // Modify kd using Bell's law
-        double kd_bell = kd*exp(fabs(bondforce)/f0);
+        // Modify kd using modified Bell's law
+        double kd_bell = 1/((1/kd - 1/kmax)/exp(fabs(bondforce)/f0) + 1/kmax);
         p_detach = 1 - exp(-kd_bell*DT_EQ);
       }
       if (flag_catch) {
