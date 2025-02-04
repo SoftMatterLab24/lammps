@@ -228,7 +228,7 @@ double BondBPMRotational::elastic_forces(int i1, int i2, int type, double r_mag,
   // Calculate normal forces, rb = bond vector in particle 1's frame
   MathExtra::qconjugate(q2, q2inv);
   MathExtra::quatrotvec(q2inv, r, rb);
-  Fr = Kr_type * (r_mag - r0_mag) + 0.15 * Kr_type * (r_mag - r0_mag) * (r_mag - r0_mag) * (r_mag - r0_mag);
+  Fr = Kr_type * (r_mag - r0_mag) + 0 * Kr_type * (r_mag - r0_mag) * (r_mag - r0_mag) * (r_mag - r0_mag);
 
   MathExtra::scale3(Fr * r_mag_inv, rb, F_rot);
 
