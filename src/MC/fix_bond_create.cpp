@@ -457,21 +457,14 @@ void FixBondCreate::post_integrate()
       if (!possible) continue;
 
       //check to see if correct molecule
-      // flag_mol = 0 means any atoms on any molecules can bond
-      if (flag_mol == 0) {
-          possible = 1;
-      }
       // flag_mol = 1 means only atoms on different molecules can bond
       if (flag_mol == 1) {
-        if (molecule[i] != molecule[j])
-          possible = 1;
+        if (molecule[i] == molecule[j]) continue;
       }
       // flag_mol = 2 means only atoms on the same molecule can bond
       if (flag_mol == 2) {
-        if (molecule[i] == molecule[j])
-          possible = 1;
+        if (molecule[i] != molecule[j]) continue;
       }
-      if (!possible) continue;
 
       // do not allow a duplicate bond to be created
       // check 1-2 neighbors of atom I
