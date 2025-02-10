@@ -82,6 +82,7 @@ FixBondCreate::FixBondCreate(LAMMPS *lmp, int narg, char **arg) :
   fraction = 1.0;
   int seed = 12345;
   atype = dtype = itype = 0;
+  flag_mol = 0;
 
   constrainflag = 0;
   constrainpass = 0;
@@ -128,6 +129,10 @@ FixBondCreate::FixBondCreate(LAMMPS *lmp, int narg, char **arg) :
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/create command");
       itype = utils::expand_type_int(FLERR, arg[iarg+1], Atom::IMPROPER, lmp);
       if (itype < 0) error->all(FLERR,"Illegal fix bond/create command");
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"mol") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
+      flag_mol = utils::inumeric(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else if (strcmp(arg[iarg],"aconstrain") == 0 &&
         strcmp(style,"bond/create/angle") == 0) {
@@ -407,6 +412,7 @@ void FixBondCreate::post_integrate()
   tagint **special = atom->special;
   int *mask = atom->mask;
   int *type = atom->type;
+  tagint *molecule = atom->molecule;
 
   // communicate partner and 1-2 special neighbors
   // to correctly handle angle constraints
@@ -446,6 +452,23 @@ void FixBondCreate::post_integrate()
       } else if (itype == jatomtype && jtype == iatomtype) {
         if ((jmaxbond == 0 || bondcount[i] < jmaxbond) &&
             (imaxbond == 0 || bondcount[j] < imaxbond))
+          possible = 1;
+      }
+      if (!possible) continue;
+
+      //check to see if correct molecule
+      // flag_mol = 0 means any atoms on any molecules can bond
+      if (flag_mol == 0) {
+          possible = 1;
+      }
+      // flag_mol = 1 means only atoms on different molecules can bond
+      if (flag_mol == 1) {
+        if (molecule[i] != molecule[j])
+          possible = 1;
+      }
+      // flag_mol = 2 means only atoms on the same molecule can bond
+      if (flag_mol == 2) {
+        if (molecule[i] == molecule[j])
           possible = 1;
       }
       if (!possible) continue;
