@@ -59,10 +59,11 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   next_reneighbor = -1;
 
   iatomtype = utils::inumeric(FLERR,arg[4],false,lmp);
-  btype = utils::inumeric(FLERR,arg[5],false,lmp);
-  ka = utils::numeric(FLERR,arg[6],false,lmp);
-  kd = utils::numeric(FLERR,arg[7],false,lmp);
-  double cutoff = utils::numeric(FLERR,arg[8],false,lmp);
+  jatomtype = utils::inumeric(FLERR,arg[5],false,lmp)
+  btype = utils::inumeric(FLERR,arg[6],false,lmp);
+  ka = utils::numeric(FLERR,arg[7],false,lmp);
+  kd = utils::numeric(FLERR,arg[8],false,lmp);
+  double cutoff = utils::numeric(FLERR,arg[9],false,lmp);
 
   if (btype < 1 || btype > atom->nbondtypes)
     error->all(FLERR,"Invalid bond type in fix bond/dynamic command");
@@ -72,7 +73,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   // Default settings
   maxbond = atom->bond_per_atom;
   seed = 12345;
-  jatomtype = iatomtype;
+  //jatomtype = iatomtype;
 
   // Flags for optional settings
   flag_prob = 0;
@@ -83,7 +84,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   flag_mol = 0;
 
   // Parse remaining arguments
-  int iarg = 9;
+  int iarg = 10;
   while (iarg < narg) {
     if (strcmp(arg[iarg],"prob") == 0) {
       if (iarg+3 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
@@ -122,10 +123,6 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
       double r_critical = utils::numeric(FLERR,arg[iarg+1],false,lmp);
       r2_critical = r_critical*r_critical;
       flag_critical = 1;
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"jtype") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
-      jatomtype = utils::inumeric(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else if (strcmp(arg[iarg],"mol") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
@@ -351,14 +348,6 @@ void FixBondDynamic::post_integrate()
       // tagj < 1 means bond is already detached or there is no bond
       if (tagj < 1) continue;
 
-      // Skip bonds that don't belong to the right type (fast)
-      //bondtype = bond_type[i][b];
-      //if ((bondtype == btype) || (bondtype == 0)) {
-      //  //do nothing
-      //} else {
-      //  continue;
-      //}
-
       // Skip bonds that don't belong to the right type (slow)
       for (int n = 0; n < nbondlist; n++) {
         int iatom = bondlist[n][0];
@@ -381,7 +370,7 @@ void FixBondDynamic::post_integrate()
 
       // Skip atoms not in the desired group or of the wrong type
       if (!(mask[j] & groupbit)) continue;
-      //if ((type[j] != iatomtype) && (type[j] != jatomtype)) continue; //### TEMP (too restrictive)
+      if ((type[i] != iatomtype or type[j] != jatomtype)) continue; //### TEMP (too restrictive)
 
       // Only consider each bond once - when my atom has the lower atom tag
       if (tag[i] > tagj) continue;
