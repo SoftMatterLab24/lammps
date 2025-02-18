@@ -59,7 +59,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   next_reneighbor = -1;
 
   iatomtype = utils::inumeric(FLERR,arg[4],false,lmp);
-  jatomtype = utils::inumeric(FLERR,arg[5],false,lmp)
+  jatomtype = utils::inumeric(FLERR,arg[5],false,lmp);
   btype = utils::inumeric(FLERR,arg[6],false,lmp);
   ka = utils::numeric(FLERR,arg[7],false,lmp);
   kd = utils::numeric(FLERR,arg[8],false,lmp);
