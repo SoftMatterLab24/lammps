@@ -308,6 +308,7 @@ void FixBondDynamic::post_integrate()
   int nbondlist = neighbor->nbondlist;
 
   int bondtype = 0;
+  int possible;
 
   if (update->ntimestep % nevery) return;
 
@@ -370,7 +371,13 @@ void FixBondDynamic::post_integrate()
 
       // Skip atoms not in the desired group or of the wrong type
       if (!(mask[j] & groupbit)) continue;
-      if ((type[i] != iatomtype or type[j] != jatomtype)) continue; //### TEMP (too restrictive)
+      possible = 0;
+      if (type[i] == iatomtype && type[j] == jatomtype) {
+         possible = 1;
+      } elseif (type[i] == jatomtype && type[j] == iatomtype) {
+         possible = 1;
+      }
+      if (!possible) continue;
 
       // Only consider each bond once - when my atom has the lower atom tag
       if (tag[i] > tagj) continue;
