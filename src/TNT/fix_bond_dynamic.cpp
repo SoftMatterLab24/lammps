@@ -374,7 +374,7 @@ void FixBondDynamic::post_integrate()
       possible = 0;
       if (type[i] == iatomtype && type[j] == jatomtype) {
          possible = 1;
-      } elseif (type[i] == jatomtype && type[j] == iatomtype) {
+      } else if (type[i] == jatomtype && type[j] == iatomtype) {
          possible = 1;
       }
       if (!possible) continue;
