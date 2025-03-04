@@ -59,7 +59,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   next_reneighbor = -1;
 
   iatomtype = utils::inumeric(FLERR,arg[4],false,lmp);
-  jatomtype = utils::inumeric(FLERR,arg[5],false,lmp)
+  jatomtype = utils::inumeric(FLERR,arg[5],false,lmp);
   btype = utils::inumeric(FLERR,arg[6],false,lmp);
   ka = utils::numeric(FLERR,arg[7],false,lmp);
   kd = utils::numeric(FLERR,arg[8],false,lmp);
@@ -264,14 +264,15 @@ void FixBondDynamic::setup(int /*vflag*/)
   int **bond_type = atom->bond_type;
   tagint **bond_atom = atom->bond_atom;
   int nlocal = atom->nlocal;
-  int **bond_type_raw = atom->bond_type;
 
   for (int i = 0; i < nlocal; i++) {
     if (num_bond[i] == 0) continue;
     for (int b = 0; b < num_bond[i]; b++) {
-       //if (bond_type[i][b] == btype) {
+      //printf("Bond Type: %i\n",bond_type_raw[i][b]);
+      //printf("Bond Type: %i\n",bond_type[i][b]);
+      if (bond_type[i][b] == btype) {
       fbd[i][b] = bond_atom[i][b];
-       //}
+      }
     }
   }
 
@@ -308,6 +309,7 @@ void FixBondDynamic::post_integrate()
   int nbondlist = neighbor->nbondlist;
 
   int bondtype = 0;
+  int possible;
 
   if (update->ntimestep % nevery) return;
 
@@ -330,47 +332,50 @@ void FixBondDynamic::post_integrate()
   // loop over local atoms
   // check for possible breaks
 
-  //int size = sizeof(bond_type_raw);
-  //printf("%i\n\n",size);
-
   for (int i = 0; i < nlocal; i++) {
 
     // Skip atoms not in the desired group or of the wrong type
     if (!(mask[i] & groupbit)) continue;
-    //if ((type[i] != iatomtype) && (type[i] != jatomtype)) continue;  //### TEMP (too restrictive)
+    if (type[i] != iatomtype) continue;
 
     // Loop through each entry of fbd
     for (int b = 0; b < maxbond; b++) {
       
       // Tag of current bond pair
       tagint tagj = fbd[i][b];
+
+      //printf("atom: %i, i-b type: %i\n",tag[i],bond_type[i][b]);
+      //printf("i-tagj type: %i\n",bond_type[i][tagj]);
       
       // tagj < 1 means bond is already detached or there is no bond
       if (tagj < 1) continue;
 
+      // Skip bonds that dont belong to right type (test)
+      if (bond_type[i][b] != btype or bond_type[i][b] == 0) continue;
+
       // Skip bonds that don't belong to the right type (slow)
-      for (int n = 0; n < nbondlist; n++) {
-        int iatom = bondlist[n][0];
-        int jatom = bondlist[n][1];
+      //for (int n = 0; n < nbondlist; n++) {
+      //  int iatom = bondlist[n][0];
+      //  int jatom = bondlist[n][1];
 
-        if((tag[iatom]==tag[i] and tag[jatom]==tagj) || (tag[iatom]==tagj and tag[jatom]==tag[i])) {
-          bondtype = bondlist[n][2];
-          break;
-        }
-      }
+      //  if((tag[iatom]==tag[i] and tag[jatom]==tagj) || (tag[iatom]==tagj and tag[jatom]==tag[i])) {
+      //    bondtype = bondlist[n][2];
+      //    break;
+      //  }
+      //}
 
-      if (bondtype != btype) continue;
+      //if (bondtype != btype) continue;
       
       // Local id of current bond pair
       int j = atom->map(tagj);
-
+      
       //if (j < 0) continue;
       //  error->one(FLERR,"Fix bond/dynamic needs ghost atoms "    //### TEMP  
       //              "from further away 1");
 
       // Skip atoms not in the desired group or of the wrong type
       if (!(mask[j] & groupbit)) continue;
-      if ((type[i] != iatomtype or type[j] != jatomtype)) continue; //### TEMP (too restrictive)
+      if (type[j] != jatomtype) continue;
 
       // Only consider each bond once - when my atom has the lower atom tag
       if (tag[i] > tagj) continue;
@@ -382,6 +387,7 @@ void FixBondDynamic::post_integrate()
       double p_detach = 1 - exp(-kd*DT_EQ);
 
       double icritical = 0;
+
       // Flags that modify kd
       if (flag_bell) {
 
@@ -452,17 +458,6 @@ void FixBondDynamic::post_integrate()
 
       // Apply probability constraint
       if (probability > p_detach) continue;
-
-      //double delx = x[i][0] - x[j][0];
-      //double dely = x[i][1] - x[j][1];
-      //double delz = x[i][2] - x[j][2];
-      //domain->minimum_image(delx, dely, delz);
-      //double rsq = delx*delx + dely*dely + delz*delz;
-      //double fbond;
-      //double engpot = bond->single(btype,rsq,i,j,fbond);
-      //if (btype==1){
-      //  printf("btype %i\n",btype);
-      //}
 
       // if kd is zero but the bond isnt broken - manually skip
       if (kd == 0 && icritical != 1) continue; 
@@ -559,6 +554,7 @@ void FixBondDynamic::post_integrate()
   int *numneigh = list->numneigh;
   int **firstneigh = list->firstneigh;
   tagint *molecule = atom->molecule;
+  int possiblec;
 
   // find potential bonding partners
 
@@ -569,7 +565,7 @@ void FixBondDynamic::post_integrate()
 
     // Skip irrelevant atoms
     if (!(mask[i] & groupbit)) continue;
-    if ((type[i] != iatomtype) && (type[i] != jatomtype)) continue;
+    if (type[i] != iatomtype) continue;
     if (npos[i] == 0) continue;
 
     // Neighbor list of atom i
@@ -583,12 +579,9 @@ void FixBondDynamic::post_integrate()
 
       // Skip irrelevant atoms
       if (!(mask[j] & groupbit)) continue;
-      if ((type[j] != iatomtype) && (type[j] != jatomtype)) continue;
       if (npos[j] == 0) continue;
       if (tag[i] == tag[j]) continue;
-
-      // Skip bonds that don't belong to the right type
-      //if (bond_type[i][j] != btype) continue;
+      if (type[j] != jatomtype) continue;
 
       // flag_mol = 1 means only atoms on different molecules can bond
       if (flag_mol == 1) {
@@ -692,7 +685,7 @@ void FixBondDynamic::post_integrate()
 
     // Skip irrelevant atoms
     if (!(mask[j] & groupbit)) continue;
-    if ((type[j] != iatomtype) && (type[j] != jatomtype)) continue;
+    if (type[j] != jatomtype) continue; //TEMP 2/18/2025
     if (npos[j] == 0) continue;
 
     // Loop through each entry of fbd
@@ -703,6 +696,7 @@ void FixBondDynamic::post_integrate()
 
       int i = atom->map(tagi);
       if (i < 0 || i > nlocal) continue;
+      if (type[i] != iatomtype) continue;
 
       // First case: atom i already has atom j as a final partner
       // check probabilities - update to more likely one if needed
@@ -794,7 +788,8 @@ void FixBondDynamic::post_integrate()
 
     // Skip irrelevant atoms
     if (!(mask[i] & groupbit)) continue;
-    if ((type[i] != iatomtype) && (type[i] != jatomtype)) continue;
+    if (type[i] != iatomtype)  continue; //TEMP as of 2/18/2025
+
     if (npos[i] == 0) continue;
 
     // Loop through possibilites
@@ -808,6 +803,9 @@ void FixBondDynamic::post_integrate()
       if (j < 0)
         error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
                     "from further away 2");
+
+      // Check type
+      if (type[j] != jatomtype)  continue;
 
       // find where this bond is in atom j's list
       // if its location is past npos[j], then this was unsuccessful
