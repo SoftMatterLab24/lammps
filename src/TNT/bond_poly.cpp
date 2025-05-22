@@ -47,7 +47,7 @@ BondPOLY::BondPOLY(LAMMPS *_lmp) :
 
   break_flag = 1;
   overlay_flag = 0;
-  ignore_special_flag = 1;
+  ignore_special_flag = 0;
   prop_atom_flag = 0;
   nvalues = 0;
 
@@ -246,7 +246,7 @@ void BondPOLY::init_style()
 
 void BondPOLY::settings(int narg, char **arg)
 {
-  leftover_iarg.clear();
+  //leftover_iarg.clear();
 
   int iarg = 0;
   while (iarg < narg) {
@@ -442,11 +442,14 @@ void BondPOLY::store_data()
       type = bond_type[i][m];
 
       //Skip if bond was turned off
-      //if (type <= 0) continue;
+      if (type <= 0) continue;
 
       // map to find index n
       j = atom->map(atom->bond_atom[i][m]);
       if (j == -1) error->one(FLERR, "Atom missing in BPM bond");
+
+      // Need to grab the correct info
+      bond_lookup(type, m, N, b);
 
       delx = x[i][0] - x[j][0];
       dely = x[i][1] - x[j][1];
@@ -457,9 +460,6 @@ void BondPOLY::store_data()
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
       bondstore[m][0] = r;
-
-      // Lookup to find bond information
-      bond_lookup(type, m, N, b);
       bondstore[m][1] = N;
       bondstore[m][2] = b;
 
@@ -483,7 +483,7 @@ void BondPOLY::compute(int eflag, int vflag) // *UPDATED
   if (!fix_bond_history->stored_flag) {
     fix_bond_history->stored_flag = true;
     //printf("Storing bond data\n");
-    //store_data();  
+    store_data();  
   }
 
   int i1, i2, itmp, n, type, ID;
@@ -517,12 +517,15 @@ void BondPOLY::compute(int eflag, int vflag) // *UPDATED
     i2 = bondlist[n][1];
     type = bondlist[n][2];
     r0 = bondstore[n][0];
+
+    N = bondstore[n][1];
+    b = bondstore[n][2];
     
     //printf("atom1: %i, atom2: %i\n",tag[i1],tag[i2]);
 
     // probably faster to get values from the lookup table
     //printf("Compute");
-    bond_lookup(type, n, N, b);
+    //bond_lookup(type, n, N, b);
 
     // Ensure pair is always ordered to ensure numerical operations
     // are identical to minimize the possibility that a bond straddling
@@ -549,17 +552,11 @@ void BondPOLY::compute(int eflag, int vflag) // *UPDATED
 
     // Determine stretch ratio //
     Nb = N * b; 
-    lam = sqrt(rsq)/Nb;
+    lam = r/Nb;
 
     // if lam -> 1, then chain is approaching contour length
         // issue a warning
     // if lam > 2 something serious is wrong, abort
-
-    if (lam > 0.99) {
-        error->warning(FLERR, "POLY bond too long: {} {:.8}", update->ntimestep, lam);
-        if (lam > 2.0) error->one(FLERR, "Bad POLY bond");
-        lam = 0.99;
-    }
 
     // Calculate force magnitude
 
@@ -573,13 +570,19 @@ void BondPOLY::compute(int eflag, int vflag) // *UPDATED
     term2 = log(1.0 - pow(lam,2.0));
     ebond = N*(term1 - term2);
 
-    //printf("force: %f, critical force: %f\n", fbond, fc[type]);
     // See if bond breaks
-    if (fabs(fbond) > fc[type] && break_flag) {
-      bondlist[n][2] = -1;
+    
+    if ((fabs(fbond) > fc[type] && break_flag) || (lam > 1 && break_flag)) {
+      //printf("force: %f, critical force: %f\n", fbond, fc[type]);
+      bondlist[n][2] = 0;
       process_broken(i1, i2);
     }
 
+    /*if (lam > 0.99) {
+        error->warning(FLERR, "POLY bond too long: {} {:.8}", update->ntimestep, lam);
+    if (lam > 2.0) error->one(FLERR, "Bad POLY bond");
+        lam = 0.99;
+    }*/
     // apply force to each of 2 atoms
 
     if (newton_bond || i1 < nlocal) {
@@ -632,7 +635,6 @@ double BondPOLY::equilibrium_distance(int i)
 void BondPOLY::write_restart(FILE *fp)
 {
   write_restart_settings(fp);
-  
 }
 
 /* ----------------------------------------------------------------------
@@ -678,8 +680,8 @@ double BondPOLY::single(int type, double rsq, int i, int j, double &fforce) // *
     return 0;
   } 
 
-  double N, b, Nb;
-  int **bondlist = neighbor->bondlist;
+  double r0, N, b, Nb;
+  /*int **bondlist = neighbor->bondlist;
   int nbondlist = neighbor->nbondlist;
   for (int n = 0; n < nbondlist; n++) {
         int atom1 = bondlist[n][0];
@@ -692,6 +694,15 @@ double BondPOLY::single(int type, double rsq, int i, int j, double &fforce) // *
             break;
         } else {
         }
+  }*/
+
+  for (int n = 0; n < atom->num_bond[i]; n++) {
+    if (atom->bond_atom[i][n] == atom->tag[j]) {
+      r0 = fix_bond_history->get_atom_value(i, n, 0);
+      N = fix_bond_history->get_atom_value(i, n, 1);
+      b = fix_bond_history->get_atom_value(i, n, 2);
+    }
+    
   }
   
   Nb = N * b; 
@@ -703,7 +714,7 @@ double BondPOLY::single(int type, double rsq, int i, int j, double &fforce) // *
   // if lam > 2 something serious is wrong, abort
 
   if (lam > 0.99) {
-    printf("Bond data | N: %f\n",N);
+    //printf("Bond data | N: %f\n",N);
     error->warning(FLERR, "POLY bond too long: {} {:.8}", update->ntimestep, lam);
     if (lam > 2.0) error->one(FLERR, "Bad POLY bond");
     lam = 0.99;
@@ -785,7 +796,7 @@ void BondPOLY::read_table(Table *tb, char *file, char *keyword) // *UPDATED
       values.next_int();
       tb->nfile[i] = values.next_double(); 
       tb->bfile[i] = values.next_double();
-      printf("reading | i: %i, N: %f, b: %f\n", i,tb->nfile[i], tb->bfile[i]);
+      //printf("reading | i: %i, N: %f, b: %f\n", i,tb->nfile[i], tb->bfile[i]);
     } catch (TokenizerException &e) {
       error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword,
                  i + 1, tb->ninput, e.what(), line);
@@ -814,7 +825,7 @@ void BondPOLY::param_extract(Table *tb, char *line)
 
       if (word == "N") {
         tb->ninput = values.next_int();
-        printf("Num Bonds to Read: %i\n", tb->ninput);
+        //printf("Num Bonds to Read: %i\n", tb->ninput);
       } else {
         error->one(FLERR, "Unknown keyword {} in bond table parameters", word);
       }
