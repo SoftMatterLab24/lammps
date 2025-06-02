@@ -11,7 +11,7 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
-#include "bond_bpm_spring.h"
+#include "bond_bpm_prony.h"
 
 #include "atom.h"
 #include "comm.h"
@@ -22,6 +22,7 @@
 #include "memory.h"
 #include "modify.h"
 #include "neighbor.h"
+#include "table_file_reader.h"
 
 #include <cmath>
 #include <cstring>
@@ -486,14 +487,14 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
 /* ---------------------------------------------------------------------- */
 
-int BondBPMProny::pack_reverse_comm(int n, int first, double *buf)
-{
-  int i, m, last;
-  m = 0;
-  last = first + n;
-  for (i = first; i < last; i++) buf[m++] = vol_current[i];
-  return m;
-}
+//int BondBPMProny::pack_reverse_comm(int n, int first, double *buf)
+//{
+//  int i, m, last;
+//  m = 0;
+//  last = first + n;
+//  for (i = first; i < last; i++) buf[m++] = vol_current[i];
+//  return m;
+//}
 
 /* ---------------------------------------------------------------------- */
 
@@ -637,7 +638,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
  void BondBPMProny::param_lookup(int type, int ID, double &tau_j, double &gamma_j)
 {
-
+    double k_temp, eta_temp;
     const Table *tb = &tables[tabindex[type]];
     
     // Grab properties for (ID + 1)th Maxwell element (first element read in as coeff)
@@ -645,7 +646,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
     eta_temp = tb->etafile[ID];
 
     tau_j = eta_temp/k_temp;
-    gamma_j = k_temp/k0;
+    gamma_j = k_temp/k0[type];
   
 }
 
