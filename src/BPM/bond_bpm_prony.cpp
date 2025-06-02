@@ -22,6 +22,7 @@
 #include "memory.h"
 #include "modify.h"
 #include "neighbor.h"
+#include "update.h"
 #include "table_file_reader.h"
 
 #include <cmath>
@@ -167,17 +168,17 @@ void BondBPMProny::compute(int eflag, int vflag)
 
   if (hybrid_flag) fix_bond_history->compress_history();
 
-  int i1, i2, itmp, n, type;
+  int i1, i2, itmp, n, m, type;
   double delx, dely, delz, delvx, delvy, delvz;
   double e, rsq, r, r0, rinv, smooth, fbond, dot;
-  double tau1, term1, term2, h1, h_j;
+  double tau1, h1, tau_j, gamma_j, h_j, term1, term2;
 
   ev_init(eflag, vflag);
 
   double **x = atom->x;
   double **v = atom->v;
   double **f = atom->f;
-  double dt = update->dt
+  double dt = update->dt;
   tagint *tag = atom->tag;
   int **bondlist = neighbor->bondlist;
   int nbondlist = neighbor->nbondlist;
@@ -187,6 +188,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   double invdim = 1.0 / dim;
 
   double **bondstore = fix_bond_history->bondstore;
+  const Table *tb = &tables[tabindex[type]];
 
 
   // First Maxell element
@@ -201,9 +203,9 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     h_j = 0;
 
-    param_lookup(type, m, tau_j, eta_j);
+    param_lookup(type, m, tau_j, gamma_j);
 
-    term1 += exp(-1*dt / tau_j) * h;
+    term1 += exp(-1*dt / tau_j) * h_j;
     term2 += gamma_j * (1 - exp(-1*dt / tau_j)) / (dt / tau_j);
 
   }
