@@ -37,10 +37,10 @@ class BondBPMProny : public BondBPM {
   void write_restart_settings(FILE *) override;
   void read_restart_settings(FILE *) override;
   double single(int, double, int, int, double &) override;
-  int pack_forward_comm(int, int *, double *, int, int *) override;
-  void unpack_forward_comm(int, int, double *) override;
-  int pack_reverse_comm(int, int, double *) override;
-  void unpack_reverse_comm(int, int *, double *) override;
+  //int pack_forward_comm(int, int *, double *, int, int *) override;
+  //void unpack_forward_comm(int, int, double *) override;
+  //int pack_reverse_comm(int, int, double *) override;
+  //void unpack_reverse_comm(int, int *, double *) override;
 
  protected:
   double *k0, *k1, *eta1 , *ecrit, *gamma;
@@ -64,8 +64,6 @@ class BondBPMProny : public BondBPM {
   void allocate();
   void store_data();
   double store_bond(int, int, int);
-  int calculate_vol();
-  void update_vol0();
 
   void null_table(Table *);
   void free_table(Table *);
@@ -73,7 +71,7 @@ class BondBPMProny : public BondBPM {
   void bcast_table(Table *);
   
   void param_extract(Table *, char *);
-  void bond_lookup(int, int, double &, double &);
+  void param_lookup(int, int, double &, double &);
 };
 
 }    // namespace LAMMPS_NS

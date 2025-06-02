@@ -33,7 +33,7 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), k1(nullptr), eta1(nullptr), av(nullptr), ecrit(nullptr), gamma(nullptr),
+    BondBPM(_lmp), k0(nullptr), k1(nullptr), eta1(nullptr), ecrit(nullptr), gamma(nullptr),
     id_fix_property_bond(nullptr), vol_current(nullptr), dvol0(nullptr)
 {
   partial_flag = 1;
@@ -77,7 +77,7 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(eta1);
     memory->destroy(ecrit);
     memory->destroy(gamma);
-    memory->destroy(av);
+    
   }
 
   memory->destroy(dvol0);
@@ -158,7 +158,6 @@ void BondBPMProny::store_data()
 void BondBPMProny::compute(int eflag, int vflag)
 {
   int i, bond_change_flag;
-  double *vol0, *vol;
 
   if (!fix_bond_history->stored_flag) {
     fix_bond_history->stored_flag = true;
@@ -227,9 +226,9 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     rinv = 1.0 / r;
     if (normalize_flag)
-      fbond = -k[type] * e;
+      fbond = -k0[type] * e;
     else
-      fbond = k[type] * (r0 - r);
+      fbond = k0[type] * (r0 - r);
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -263,73 +262,6 @@ void BondBPMProny::compute(int eflag, int vflag)
   }
 
   if (hybrid_flag) fix_bond_history->uncompress_history();
-}
-
-/* ---------------------------------------------------------------------- */
-
-int BondBPMProny::calculate_vol()
-{
-  int n, i1, i2;
-  double r0, delx, dely, delz, rsq, vol_temp;
-
-  int nlocal = atom->nlocal;
-  int ntotal = nlocal + atom->nghost;
-  int newton_bond = force->newton_bond;
-  int dim = domain->dimension;
-
-  double **x = atom->x;
-  int **bondlist = neighbor->bondlist;
-  int nbondlist = neighbor->nbondlist;
-  double **bondstore = fix_bond_history->bondstore;
-
-  for (n = 0; n < ntotal; n++) vol_current[n] = 0.0;
-
-  int bond_change_flag = 0;
-
-  for (n = 0; n < nbondlist; n++) {
-    if (bondlist[n][2] <= 0) continue;
-    i1 = bondlist[n][0];
-    i2 = bondlist[n][1];
-    r0 = bondstore[n][0];
-
-    delx = x[i1][0] - x[i2][0];
-    dely = x[i1][1] - x[i2][1];
-    delz = x[i1][2] - x[i2][2];
-    rsq = delx * delx + dely * dely + delz * delz;
-
-    vol_temp = rsq;
-    if (dim == 3) vol_temp *= sqrt(rsq);
-
-    if (newton_bond || i1 < nlocal) vol_current[i1] += vol_temp;
-    if (newton_bond || i2 < nlocal) vol_current[i2] += vol_temp;
-
-    // If bond hasn't been set - increment dvol0 too to update vol0
-    if (r0 < EPSILON || std::isnan(r0)) {
-      bond_change_flag = 1;
-      if (newton_bond || i1 < nlocal) dvol0[i1] += vol_temp;
-      if (newton_bond || i2 < nlocal) dvol0[i2] += vol_temp;
-    }
-  }
-
-  if (newton_bond) comm->reverse_comm(this);
-  comm->forward_comm(this);
-
-  return bond_change_flag;
-}
-
-/* ---------------------------------------------------------------------- */
-
-void BondBPMProny::update_vol0()
-{
-  // accumulate changes in vol0 from ghosts
-  vol_current = dvol0;
-  if (force->newton_bond) comm->reverse_comm(this);
-
-  double *vol0 = atom->dvector[index_vol0];
-  for (int i = 0; i < atom->nlocal; i++) vol0[i] += dvol0[i];
-
-  // zero dvol0 for next change
-  for (int i = 0; i < nmax; i++) dvol0[i] = 0.0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -442,7 +374,6 @@ void BondBPMProny::write_restart(FILE *fp)
   fwrite(&eta1[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&ecrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
-  fwrite(&av[1], sizeof(double), atom->nbondtypes, fp);
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
@@ -464,7 +395,6 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &eta1[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &ecrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &av[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -475,7 +405,6 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&eta1[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&ecrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&av[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
@@ -523,18 +452,9 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double e = (r - r0) / r0;
 
   if (normalize_flag)
-    fforce = -k[type] * e;
+    fforce = -k0[type] * e;
   else
-    fforce = k[type] * (r0 - r);
-
-  if (volume_flag) {
-    double invdim = 1.0 / domain->dimension;
-    double *vol0 = atom->dvector[index_vol0];
-    double *vol = atom->dvector[index_vol];
-    double vol_sum = vol[i] + vol[j];
-    double vol0_sum = vol0[i] + vol0[j];
-    fforce += av[type] * (pow(vol_sum / vol0_sum, invdim) - 1.0 - e);
-  }
+    fforce = k0[type] * (r0 - r);
 
   double **x = atom->x;
   double **v = atom->v;
@@ -577,38 +497,38 @@ int BondBPMProny::pack_reverse_comm(int n, int first, double *buf)
 
 /* ---------------------------------------------------------------------- */
 
-void BondBPMProny::unpack_reverse_comm(int n, int *list, double *buf)
-{
-  int i, j, m;
-  m = 0;
-  for (i = 0; i < n; i++) {
-    j = list[i];
-    vol_current[j] += buf[m++];
-  }
-}
+//void BondBPMProny::unpack_reverse_comm(int n, int *list, double *buf)
+//{
+//  int i, j, m;
+//  m = 0;
+//  for (i = 0; i < n; i++) {
+//    j = list[i];
+//    vol_current[j] += buf[m++];
+//  }
+//}
 
 /* ---------------------------------------------------------------------- */
 
-int BondBPMProny::pack_forward_comm(int n, int *list, double *buf, int /*pbc_flag*/, int * /*pbc*/)
-{
-  int i, j, m;
-  m = 0;
-  for (i = 0; i < n; i++) {
-    j = list[i];
-    buf[m++] = vol_current[j];
-  }
-  return m;
-}
+//int BondBPMProny::pack_forward_comm(int n, int *list, double *buf, int /*pbc_flag*/, int * /*pbc*/)
+//{
+//  int i, j, m;
+//  m = 0;
+//  for (i = 0; i < n; i++) {
+//    j = list[i];
+//    buf[m++] = vol_current[j];
+//  }
+//  return m;
+//}
 
 /* ---------------------------------------------------------------------- */
 
-void BondBPMProny::unpack_forward_comm(int n, int first, double *buf)
-{
-  int i, m, last;
-  m = 0;
-  last = first + n;
-  for (i = first; i < last; i++) vol_current[i] = buf[m++];
-}
+//void BondBPMProny::unpack_forward_comm(int n, int first, double *buf)
+//{
+//  int i, m, last;
+//  m = 0;
+//  last = first + n;
+//  for (i = first; i < last; i++) vol_current[i] = buf[m++];
+//}
 
 /* ----------------------------------------------------------------------
     read from table file
@@ -668,7 +588,9 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
       values.next_int();
       tb->kfile[i] = values.next_double(); 
       tb->etafile[i] = values.next_double();
-      //printf("reading | i: %i, N: %f, b: %f\n", i,tb->nfile[i], tb->bfile[i]);
+      
+      if (tb->kfile[i] <= 0) error->one(FLERR, "Bond parameter must positive non-zero");
+
     } catch (TokenizerException &e) {
       error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword,
                  i + 1, tb->ninput, e.what(), line);
@@ -711,32 +633,19 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
 /* ---------------------------------------------------------------------- */
 
- void BondBPMProny::bond_lookup(int type, int ID, double &N, double &b) // *UPDATED
+//double DT_EQ = (update->dt)*nevery;
+
+ void BondBPMProny::param_lookup(int type, int ID, double &tau_j, double &gamma_j)
 {
-  tagint *tag = atom->tag;
-  int **bondlist = neighbor->bondlist;
-  int nbondlist = neighbor->nbondlist;
 
-  int atom1,atom2,id1,id2;
+    const Table *tb = &tables[tabindex[type]];
+    
+    // Grab properties for (ID + 1)th Maxwell element (first element read in as coeff)
+    k_temp = tb->kfile[ID];
+    eta_temp = tb->etafile[ID];
 
-  const Table *tb = &tables[tabindex[type]];
-
-    atom1 = bondlist[ID][0];
-    atom2 = bondlist[ID][1];
-
-    for (size_t i = 0; i < tb->ninput; i++) {
-      
-      id1 = bondlist[i][0];
-      id2 = bondlist[i][1];
-
-      //printf("ID: %i, atom1: %i, atom2: %i, id1: %i, id2: %i\n", ID, tag[atom1], tag[atom2], tag[id1], tag[id2]);
-
-      if ((tag[atom1] == tag[id1] && tag[atom2] == tag[id2]) || (tag[atom1] == tag[id2] && tag[atom2] == tag[id1])) {
-        N = tb->nfile[i];
-        b = tb->bfile[i];
-        break;
-      } 
-    }
+    tau_j = eta_temp/k_temp;
+    gamma_j = k_temp/k0;
   
 }
 
