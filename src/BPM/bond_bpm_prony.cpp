@@ -81,7 +81,6 @@ BondBPMProny::~BondBPMProny()
     
   }
 
-  memory->destroy(dvol0);
 }
 
 /* ----------------------------------------------------------------------
@@ -171,13 +170,14 @@ void BondBPMProny::compute(int eflag, int vflag)
   int i1, i2, itmp, n, type;
   double delx, dely, delz, delvx, delvy, delvz;
   double e, rsq, r, r0, rinv, smooth, fbond, dot;
-  double vol_sum, vol0_sum, vol_temp;
+  double tau1, term1, term2, h1, h_j;
 
   ev_init(eflag, vflag);
 
   double **x = atom->x;
   double **v = atom->v;
   double **f = atom->f;
+  double dt = update->dt
   tagint *tag = atom->tag;
   int **bondlist = neighbor->bondlist;
   int nbondlist = neighbor->nbondlist;
@@ -187,6 +187,26 @@ void BondBPMProny::compute(int eflag, int vflag)
   double invdim = 1.0 / dim;
 
   double **bondstore = fix_bond_history->bondstore;
+
+
+  // First Maxell element
+  tau1 = eta1[type] / k1[type];
+  h1 = 0;
+
+  term1 = exp(-1*dt / tau1) * h1;
+  term2 = (1 - exp(-1*dt / tau1)) / (dt / tau1);
+
+  // Loop through remaining Maxwell Elements
+  for (m = 0; m < tb->ninput; m++) {
+
+    h_j = 0;
+
+    param_lookup(type, m, tau_j, eta_j);
+
+    term1 += exp(-1*dt / tau_j) * h;
+    term2 += gamma_j * (1 - exp(-1*dt / tau_j)) / (dt / tau_j);
+
+  }
 
   for (n = 0; n < nbondlist; n++) {
 
@@ -634,7 +654,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
 /* ---------------------------------------------------------------------- */
 
-//double DT_EQ = (update->dt)*nevery;
+//double dt = (update->dt)*nevery;
 
  void BondBPMProny::param_lookup(int type, int ID, double &tau_j, double &gamma_j)
 {
@@ -645,8 +665,8 @@ void BondBPMProny::param_extract(Table *tb, char *line)
     k_temp = tb->kfile[ID];
     eta_temp = tb->etafile[ID];
 
-    tau_j = eta_temp/k_temp;
-    gamma_j = k_temp/k0[type];
+    tau_j = eta_temp / k_temp;
+    gamma_j = k_temp / k0[type];
   
 }
 
