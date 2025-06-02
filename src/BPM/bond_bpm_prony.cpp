@@ -33,17 +33,19 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k(nullptr), av(nullptr), ecrit(nullptr), gamma(nullptr),
+    BondBPM(_lmp), k0(nullptr), k1(nullptr), eta1(nullptr), av(nullptr), ecrit(nullptr), gamma(nullptr),
     id_fix_property_bond(nullptr), vol_current(nullptr), dvol0(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
   normalize_flag = 0;
-  volume_flag = 0;
   writedata = 0;
 
+  ntables = 0;
+  tables = nullptr;
+
   nhistory = 1;
-  id_fix_bond_history = utils::strdup("HISTORY_BPM_SPRING");
+  id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
   single_extra = 1;
   svector = new double[1];
@@ -64,9 +66,15 @@ BondBPMProny::~BondBPMProny()
     delete[] id_fix_property_bond;
   }
 
+  for (int m = 0; m < ntables; m++) free_table(&tables[m]);
+  memory->sfree(tables);
+
   if (allocated) {
     memory->destroy(setflag);
-    memory->destroy(k);
+    memory->destroy(tabindex);
+    memory->destroy(k0);
+    memory->destroy(k1);
+    memory->destroy(eta1);
     memory->destroy(ecrit);
     memory->destroy(gamma);
     memory->destroy(av);
@@ -152,45 +160,10 @@ void BondBPMProny::compute(int eflag, int vflag)
   int i, bond_change_flag;
   double *vol0, *vol;
 
-  if (volume_flag) {
-    vol0 = atom->dvector[index_vol0];
-    vol = atom->dvector[index_vol];
-
-    // grow + initialize dvol0 as necessary
-    if (nmax < atom->nmax) {
-      nmax = atom->nmax;
-      memory->create(dvol0, nmax, "bond/bpm/spring:dvol0");
-      for (i = 0; i < nmax; i++) dvol0[i] = 0.0;
-    }
-  }
-
   if (!fix_bond_history->stored_flag) {
     fix_bond_history->stored_flag = true;
     store_data();
 
-    if (volume_flag) {
-      vol_current = vol0;
-      bond_change_flag = calculate_vol();
-
-      // zero dvol0, not needed since vol0 just calculated
-      for (i = 0; i < nmax; i++) dvol0[i] = 0.0;
-    }
-  }
-
-  if (volume_flag) {
-    vol_current = vol;
-    bond_change_flag = calculate_vol();
-
-    // Update vol0 to account for any new bonds
-    if (bond_change_flag) {
-      update_vol0();
-
-      // forward new vol0 to ghosts before force calculation
-      vol_current = vol0;
-      comm->forward_comm(this);
-
-      bond_change_flag = 0;
-    }
   }
 
   if (hybrid_flag) fix_bond_history->compress_history();
@@ -249,14 +222,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       bondlist[n][2] = 0;
       process_broken(i1, i2);
 
-      if (volume_flag) {
-        bond_change_flag = 1;
-        vol_temp = r0 * r0;
-        if (dim == 3) vol_temp *= r0;
-        if (newton_bond || i1 < nlocal) dvol0[i1] -= vol_temp;
-        if (newton_bond || i2 < nlocal) dvol0[i2] -= vol_temp;
-      }
-
       continue;
     }
 
@@ -265,12 +230,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       fbond = -k[type] * e;
     else
       fbond = k[type] * (r0 - r);
-
-    if (volume_flag) {
-      vol_sum = vol[i1] + vol[i2];
-      vol0_sum = vol0[i1] + vol0[i2];
-      fbond += av[type] * (pow(vol_sum / vol0_sum, invdim) - 1.0 - e);
-    }
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -302,9 +261,6 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     if (evflag) ev_tally(i1, i2, nlocal, newton_bond, 0.0, fbond, delx, dely, delz);
   }
-
-  // Update vol0 to account for any broken bonds
-  if (volume_flag && bond_change_flag) update_vol0();
 
   if (hybrid_flag) fix_bond_history->uncompress_history();
 }
@@ -383,11 +339,13 @@ void BondBPMProny::allocate()
   allocated = 1;
   const int np1 = atom->nbondtypes + 1;
 
-  memory->create(k, np1, "bond:k");
+  memory->create(k0, np1, "bond:k0");
+  memory->create(k1, np1, "bond:k1");
+  memory->create(eta1, np1, "bond:eta1");
   memory->create(ecrit, np1, "bond:ecrit");
   memory->create(gamma, np1, "bond:gamma");
-  memory->create(av, np1, "bond:av");
 
+  memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
   for (int i = 1; i < np1; i++) setflag[i] = 0;
 }
@@ -398,26 +356,30 @@ void BondBPMProny::allocate()
 
 void BondBPMProny::coeff(int narg, char **arg)
 {
-  if ((!volume_flag && narg != 4) || (volume_flag && narg != 5))
-    error->all(FLERR, "Incorrect args for bond coefficients");
+  if (narg != 8) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo, ihi;
   utils::bounds(FLERR, arg[0], 1, atom->nbondtypes, ilo, ihi, error);
+  
+  double k_zero = utils::numeric(FLERR, arg[1], false, lmp);
+  double k_one = utils::numeric(FLERR, arg[2], false, lmp);
+  double eta_one = utils::numeric(FLERR, arg[3], false, lmp);
+  double ecrit_one = utils::numeric(FLERR, arg[4], false, lmp);
+  double gamma_one = utils::numeric(FLERR, arg[5], false, lmp);
 
-  double k_one = utils::numeric(FLERR, arg[1], false, lmp);
-  double ecrit_one = utils::numeric(FLERR, arg[2], false, lmp);
-  double gamma_one = utils::numeric(FLERR, arg[3], false, lmp);
-
-  double av_one = 0.0;
-  if (volume_flag) av_one = utils::numeric(FLERR, arg[4], false, lmp);
+  tables = (Table *) memory->srealloc(tables, (ntables + 1) * sizeof(Table), "bond:tables");
+  Table *tb = &tables[ntables];
+  null_table(tb);
+  if (comm->me == 0) read_table(tb, arg[6], arg[7]);
+  bcast_table(tb);
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
-    k[i] = k_one;
+    k0[i] = k_zero;
+    k1[i] = k_one;
     ecrit[i] = ecrit_one;
     gamma[i] = gamma_one;
-    av[i] = av_one;
     setflag[i] = 1;
     count++;
 
@@ -436,17 +398,8 @@ void BondBPMProny::init_style()
   BondBPM::init_style();
 
   if (comm->ghost_velocity == 0)
-    error->all(FLERR, "Bond bpm/spring requires ghost atoms store velocity");
+    error->all(FLERR, "Bond bpm/prony requires ghost atoms store velocity");
 
-  if (volume_flag && !id_fix_property_bond) {
-    id_fix_property_bond = utils::strdup("BOND_BPM_SPRING_FIX_PROPERTY_ATOM");
-    modify->add_fix(fmt::format("{} all property/atom d_vol d_vol0 ghost yes writedata no",
-                                id_fix_property_bond));
-
-    int tmp1 = 0, tmp2 = 0;
-    index_vol = atom->find_custom("vol", tmp1, tmp2);
-    index_vol0 = atom->find_custom("vol0", tmp1, tmp2);
-  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -463,23 +416,8 @@ void BondBPMProny::settings(int narg, char **arg)
       smooth_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
       i += 1;
     } else if (strcmp(arg[iarg], "normalize") == 0) {
-      if (iarg + 1 > narg)
-        error->all(FLERR, "Illegal bond bpm command, missing option for normalize");
+      if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for normalize");
       normalize_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
-      i += 1;
-    } else if (strcmp(arg[iarg], "volume/factor") == 0) {
-      if (iarg + 1 > narg)
-        error->all(FLERR, "Illegal bond bpm command, missing option for volume/factor");
-      volume_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
-
-      if (volume_flag) {
-        comm_forward = 1;
-        comm_reverse = 1;
-      } else {
-        comm_forward = 0;
-        comm_reverse = 0;
-      }
-
       i += 1;
     } else {
       error->all(FLERR, "Illegal bond bpm command, invalid argument {}", arg[iarg]);
@@ -499,10 +437,15 @@ void BondBPMProny::write_restart(FILE *fp)
   BondBPM::write_restart(fp);
   write_restart_settings(fp);
 
-  fwrite(&k[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&k0[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&k1[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&eta1[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&ecrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&av[1], sizeof(double), atom->nbondtypes, fp);
+
+  fwrite(&tabstyle, sizeof(int), 1, fp);
+  fwrite(&tablength, sizeof(int), 1, fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -516,15 +459,26 @@ void BondBPMProny::read_restart(FILE *fp)
   allocate();
 
   if (comm->me == 0) {
-    utils::sfread(FLERR, &k[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &eta1[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &ecrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &av[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+
+    utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
   }
-  MPI_Bcast(&k[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+
+  MPI_Bcast(&k0[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&k1[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&eta1[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&ecrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&av[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+
+  MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
+  MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
 
   for (int i = 1; i <= atom->nbondtypes; i++) setflag[i] = 1;
 }
@@ -537,7 +491,6 @@ void BondBPMProny::write_restart_settings(FILE *fp)
 {
   fwrite(&smooth_flag, sizeof(int), 1, fp);
   fwrite(&normalize_flag, sizeof(int), 1, fp);
-  fwrite(&volume_flag, sizeof(int), 1, fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -549,11 +502,9 @@ void BondBPMProny::read_restart_settings(FILE *fp)
   if (comm->me == 0) {
     utils::sfread(FLERR, &smooth_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &normalize_flag, sizeof(int), 1, fp, nullptr, error);
-    utils::sfread(FLERR, &volume_flag, sizeof(int), 1, fp, nullptr, error);
   }
   MPI_Bcast(&smooth_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&normalize_flag, 1, MPI_INT, 0, world);
-  MPI_Bcast(&volume_flag, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -663,4 +614,153 @@ void BondBPMProny::unpack_forward_comm(int n, int first, double *buf)
     read from table file
  ------------------------------------------------------------------------- */
 
- 
+void BondBPMProny::null_table(Table *tb) // *UPDATED
+{
+  tb->kfile = tb->etafile = nullptr;
+  tb->k = tb->eta =  nullptr;
+
+}
+
+/* ---------------------------------------------------------------------- */
+
+void BondBPMProny::free_table(Table *tb) // *UPDATED
+{
+  memory->destroy(tb->kfile);
+  memory->destroy(tb->etafile);
+
+  memory->destroy(tb->k);
+  memory->destroy(tb->eta);
+
+}
+
+/* ----------------------------------------------------------------------
+   read table file, only called by proc 0
+------------------------------------------------------------------------- */
+
+void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
+{
+  TableFileReader reader(lmp, file, "bond");
+
+  char *line = reader.find_section_start(keyword);
+
+  if (!line) error->one(FLERR, "Did not find keyword {} in table file", keyword);
+
+  // read args on 2nd line of section
+  // allocate table arrays for file values
+
+  line = reader.next_line();
+  param_extract(tb, line);
+  memory->create(tb->kfile, tb->ninput, "bond:kfile");
+  memory->create(tb->etafile, tb->ninput, "bond:etafile");
+
+  // read n,b table values from file
+
+  int r0idx = -1;
+
+  reader.skip_line();
+  for (int i = 0; i < tb->ninput; i++) {
+    line = reader.next_line();
+    if (!line)
+      error->one(FLERR, "Data missing when parsing bond table '{}' line {} of {}.", keyword, i + 1,
+                 tb->ninput);
+    try {
+      ValueTokenizer values(line);
+      values.next_int();
+      tb->kfile[i] = values.next_double(); 
+      tb->etafile[i] = values.next_double();
+      //printf("reading | i: %i, N: %f, b: %f\n", i,tb->nfile[i], tb->bfile[i]);
+    } catch (TokenizerException &e) {
+      error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword,
+                 i + 1, tb->ninput, e.what(), line);
+    }
+
+  }
+
+}
+
+/* ----------------------------------------------------------------------
+   extract attributes from parameter line in table section
+   format of line: N value FP fplo fphi EQ r0
+   N is required, other params are optional
+------------------------------------------------------------------------- */
+
+void BondBPMProny::param_extract(Table *tb, char *line)
+{
+  tb->ninput = 0;
+  tb->r0 = 0.0;
+
+  try {
+    ValueTokenizer values(line);
+
+    while (values.has_next()) {
+      std::string word = values.next_string();
+
+      if (word == "N") {
+        tb->ninput = values.next_int();
+        //printf("Num Bonds to Read: %i\n", tb->ninput);
+      } else {
+        error->one(FLERR, "Unknown keyword {} in bond table parameters", word);
+      }
+    }
+  } catch (TokenizerException &e) {
+    error->one(FLERR, e.what());
+  }
+
+  if (tb->ninput == 0) error->one(FLERR, "Bond table parameters did not set N");
+}
+
+/* ---------------------------------------------------------------------- */
+
+ void BondBPMProny::bond_lookup(int type, int ID, double &N, double &b) // *UPDATED
+{
+  tagint *tag = atom->tag;
+  int **bondlist = neighbor->bondlist;
+  int nbondlist = neighbor->nbondlist;
+
+  int atom1,atom2,id1,id2;
+
+  const Table *tb = &tables[tabindex[type]];
+
+    atom1 = bondlist[ID][0];
+    atom2 = bondlist[ID][1];
+
+    for (size_t i = 0; i < tb->ninput; i++) {
+      
+      id1 = bondlist[i][0];
+      id2 = bondlist[i][1];
+
+      //printf("ID: %i, atom1: %i, atom2: %i, id1: %i, id2: %i\n", ID, tag[atom1], tag[atom2], tag[id1], tag[id2]);
+
+      if ((tag[atom1] == tag[id1] && tag[atom2] == tag[id2]) || (tag[atom1] == tag[id2] && tag[atom2] == tag[id1])) {
+        N = tb->nfile[i];
+        b = tb->bfile[i];
+        break;
+      } 
+    }
+  
+}
+
+/* ----------------------------------------------------------------------
+   broadcast read-in table info from proc 0 to other procs
+   this function communicates these values in Table:
+     ninput,rfile,efile,ffile,fpflag,fplo,fphi,r0
+------------------------------------------------------------------------- */
+
+void BondBPMProny::bcast_table(Table *tb) // *UPDATED
+{
+  MPI_Bcast(&tb->ninput, 1, MPI_INT, 0, world);
+  MPI_Bcast(&tb->r0, 1, MPI_DOUBLE, 0, world);
+
+  int me;
+  MPI_Comm_rank(world, &me);
+  if (me > 0) {
+    memory->create(tb->kfile, tb->ninput, "bond:kfile");
+    memory->create(tb->etafile, tb->ninput, "bond:etafile");
+  }
+
+  MPI_Bcast(tb->kfile, tb->ninput, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tb->etafile, tb->ninput, MPI_DOUBLE, 0, world);
+
+}
+
+/* ---------------------------------------------------------------------- */

@@ -43,18 +43,37 @@ class BondBPMProny : public BondBPM {
   void unpack_reverse_comm(int, int *, double *) override;
 
  protected:
-  double *k, *av, *ecrit, *gamma;
-  int smooth_flag, normalize_flag, volume_flag;
+  double *k0, *k1, *eta1 , *ecrit, *gamma;
+  int smooth_flag, normalize_flag;
 
   int index_vol, index_vol0, nmax;
   char *id_fix_property_bond;
   double *vol_current, *dvol0;
+
+  struct Table {
+   int ninput, fpflag;
+   double fplo, fphi, r0;
+   double lo, hi;
+   double *kfile, *etafile;
+   double *k, *eta;
+  };
+
+  int tabstyle, tablength, ntables, *tabindex;
+  Table *tables;
 
   void allocate();
   void store_data();
   double store_bond(int, int, int);
   int calculate_vol();
   void update_vol0();
+
+  void null_table(Table *);
+  void free_table(Table *);
+  void read_table(Table *, char *, char *);
+  void bcast_table(Table *);
+  
+  void param_extract(Table *, char *);
+  void bond_lookup(int, int, double &, double &);
 };
 
 }    // namespace LAMMPS_NS
