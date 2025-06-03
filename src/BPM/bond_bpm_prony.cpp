@@ -260,6 +260,8 @@ void BondBPMProny::compute(int eflag, int vflag)
     fbond -= gamma[type] * dot * rinv;
     fbond *= rinv;
 
+    printf("Bond force %f \n",fbond);
+
     if (smooth_flag) {
       smooth = (r - r0) / (r0 * ecrit[type]);
       smooth *= smooth;
@@ -642,7 +644,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
       if (word == "N") {
         tb->ninput = values.next_int();
-        //printf("Num Bonds to Read: %i\n", tb->ninput);
+        printf("Num Elements to Read: %i\n", tb->ninput);
       } else {
         error->one(FLERR, "Unknown keyword {} in bond table parameters", word);
       }
@@ -656,8 +658,6 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
 /* ---------------------------------------------------------------------- */
 
-//double dt = (update->dt)*nevery;
-
  void BondBPMProny::param_lookup(int type, int ID, double &tau_j, double &gamma_j)
 {
     double k_temp, eta_temp;
@@ -667,8 +667,12 @@ void BondBPMProny::param_extract(Table *tb, char *line)
     k_temp = tb->kfile[ID];
     eta_temp = tb->etafile[ID];
 
+    printf("Param Lookup %f \n",k_temp);
+
     tau_j = eta_temp / k_temp;
     gamma_j = k_temp / k0[type];
+
+
   
 }
 
