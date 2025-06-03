@@ -54,8 +54,8 @@ class BondBPMProny : public BondBPM {
    int ninput, fpflag;
    double fplo, fphi, r0;
    double lo, hi;
-   double *kfile, *etafile;
-   double *k, *eta;
+   double *kfile, *etafile, *expfile;
+   double *k, *eta, *expj;
   };
 
   int tabstyle, tablength, ntables, *tabindex;
