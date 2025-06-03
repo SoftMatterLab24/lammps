@@ -188,9 +188,9 @@ void BondBPMProny::compute(int eflag, int vflag)
   double invdim = 1.0 / dim;
 
   double **bondstore = fix_bond_history->bondstore;
-  const Table *tb = &tables[tabindex[type]];
+  //const Table *tb = &tables[tabindex[type]];
 
-
+  /*
   // First Maxell element
   tau1 = eta1[type] / k1[type];
   h1 = 0;
@@ -207,9 +207,9 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     term1 += exp(-1*dt / tau_j) * h_j;
     term2 += gamma_j * (1 - exp(-1*dt / tau_j)) / (dt / tau_j);
-
+ 
   }
-
+  */
   for (n = 0; n < nbondlist; n++) {
 
     // skip bond if already broken
@@ -260,7 +260,7 @@ void BondBPMProny::compute(int eflag, int vflag)
     fbond -= gamma[type] * dot * rinv;
     fbond *= rinv;
 
-    printf("Bond force %f \n",fbond);
+    //printf("Bond force %f \n",fbond);
 
     if (smooth_flag) {
       smooth = (r - r0) / (r0 * ecrit[type]);
@@ -561,8 +561,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
 void BondBPMProny::null_table(Table *tb) // *UPDATED
 {
-  tb->kfile = tb->etafile = nullptr;
-  tb->k = tb->eta =  nullptr;
+  tb->kfile = tb->etafile = tb->expfile = nullptr;
+  tb->k = tb->eta = tb->expj = nullptr;
 
 }
 
@@ -572,10 +572,11 @@ void BondBPMProny::free_table(Table *tb) // *UPDATED
 {
   memory->destroy(tb->kfile);
   memory->destroy(tb->etafile);
+  memory->destroy(tb->expfile);
 
   memory->destroy(tb->k);
   memory->destroy(tb->eta);
-
+  memory->destroy(tb->expj);
 }
 
 /* ----------------------------------------------------------------------
@@ -584,6 +585,8 @@ void BondBPMProny::free_table(Table *tb) // *UPDATED
 
 void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
 {
+  double dt = update->dt;
+
   TableFileReader reader(lmp, file, "bond");
 
   char *line = reader.find_section_start(keyword);
@@ -597,6 +600,7 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
   param_extract(tb, line);
   memory->create(tb->kfile, tb->ninput, "bond:kfile");
   memory->create(tb->etafile, tb->ninput, "bond:etafile");
+  memory->create(tb->expfile,tb->ninput, "bond:expfile");
 
   // read n,b table values from file
 
@@ -613,8 +617,10 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
       values.next_int();
       tb->kfile[i] = values.next_double(); 
       tb->etafile[i] = values.next_double();
+
+      tb->expfile[i] = exp((-dt * tb->kfile[i]) / tb->etafile[i]); // only calculate exponential terms once - store in table
       
-      if (tb->kfile[i] <= 0) error->one(FLERR, "Bond parameter must positive non-zero");
+      if ((tb->kfile[i] <= 0) || (tb->etafile[i] <= 0) ) error->one(FLERR, "Bond parameters must positive non-zero");
 
     } catch (TokenizerException &e) {
       error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword,
@@ -627,8 +633,7 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
 
 /* ----------------------------------------------------------------------
    extract attributes from parameter line in table section
-   format of line: N value FP fplo fphi EQ r0
-   N is required, other params are optional
+   format of line: N value 
 ------------------------------------------------------------------------- */
 
 void BondBPMProny::param_extract(Table *tb, char *line)
@@ -673,13 +678,12 @@ void BondBPMProny::param_extract(Table *tb, char *line)
     gamma_j = k_temp / k0[type];
 
 
-  
 }
 
 /* ----------------------------------------------------------------------
    broadcast read-in table info from proc 0 to other procs
    this function communicates these values in Table:
-     ninput,rfile,efile,ffile,fpflag,fplo,fphi,r0
+     ninput,kfile,etafile,expfile,r0
 ------------------------------------------------------------------------- */
 
 void BondBPMProny::bcast_table(Table *tb) // *UPDATED
@@ -692,10 +696,12 @@ void BondBPMProny::bcast_table(Table *tb) // *UPDATED
   if (me > 0) {
     memory->create(tb->kfile, tb->ninput, "bond:kfile");
     memory->create(tb->etafile, tb->ninput, "bond:etafile");
+    memory->create(tb->expfile, tb->ninput, "bond:expfile");
   }
 
   MPI_Bcast(tb->kfile, tb->ninput, MPI_DOUBLE, 0, world);
   MPI_Bcast(tb->etafile, tb->ninput, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tb->expfile, tb->ninput, MPI_DOUBLE, 0, world);
 
 }
 
