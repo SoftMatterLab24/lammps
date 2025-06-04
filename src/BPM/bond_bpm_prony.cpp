@@ -46,7 +46,7 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   ntables = 0;
   tables = nullptr;
 
-  nhistory = 1;
+  nhistory = 3;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
   single_extra = 1;
@@ -251,7 +251,7 @@ void BondBPMProny::compute(int eflag, int vflag)
     const Table *tb = &tables[tabindex[type]];
 
     // Loop through Maxwell elements
-    for (m = 0; m < tb->ninput; n++ ) {
+    for (m = 0; m < tb->ninput; m++ ) {
 
       //Get element specific params
       k_temp = tb->kfile[m];
@@ -264,6 +264,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       // Get bond history variable
       Hn = bondstore[n][m+2];
 
+      //printf("bondid %i, maxwell index: %i, exp: %f, H: %f\n",m,exp_j,Hn);
       term1 = exp_j * Hn;
       term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
 
@@ -481,19 +482,49 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 {
   if (type <= 0) return 0.0;
 
-  double r0;
-  for (int n = 0; n < atom->num_bond[i]; n++) {
-    if (atom->bond_atom[i][n] == atom->tag[j]) r0 = fix_bond_history->get_atom_value(i, n, 0);
-  }
+  const Table *tb = &tables[tabindex[type]];
+  double dt = update->dt;
 
   double r = sqrt(rsq);
   double rinv = 1.0 / r;
   double e = (r - r0) / r0;
 
+  double r0, rn;
+  double k_temp, eta_temp, exp_j, gamma_j, tau_j, Hn, term1, term2;
+  
+  for (int n = 0; n < atom->num_bond[i]; n++) {
+    if (atom->bond_atom[i][n] == atom->tag[j]) {
+      r0 = fix_bond_history->get_atom_value(i, n, 0);
+      rn = fix_bond_history->get_atom_value(i, n, 1);
+
+      // Loop through Maxwell elements
+      for (int m = 0; m < tb->ninput; m++ ) {
+
+        //Get element specific params
+        k_temp = tb->kfile[m];
+        eta_temp = tb->etafile[m];
+        exp_j = tb->expfile[m];
+
+        gamma_j = k_temp / k0[type];
+        tau_j = eta_temp / k_temp;
+
+        Hn = fix_bond_history->get_atom_value(i, n, m+2);
+
+        term1 = exp_j * Hn;
+        term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
+
+        fforce += term1 + term2;
+
+      }
+
+    }
+  }
+
+  //rate-independent
   if (normalize_flag)
-    fforce = -k0[type] * e;
+    fforce += -k0[type] * e;
   else
-    fforce = k0[type] * (r0 - r);
+    fforce += k0[type] * (r0 - r);
 
   double **x = atom->x;
   double **v = atom->v;
