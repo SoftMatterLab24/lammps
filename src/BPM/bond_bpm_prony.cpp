@@ -35,7 +35,7 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), k1(nullptr), eta1(nullptr), ecrit(nullptr), gamma(nullptr),
+    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr),
     id_fix_property_bond(nullptr), vol_current(nullptr), dvol0(nullptr)
 {
   partial_flag = 1;
@@ -75,8 +75,6 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(setflag);
     memory->destroy(tabindex);
     memory->destroy(k0);
-    memory->destroy(k1);
-    memory->destroy(eta1);
     memory->destroy(ecrit);
     memory->destroy(gamma);
     
@@ -123,10 +121,12 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
 void BondBPMProny::store_data()
 {
-  int i, j, m, type;
+  int i, j, n, m, type;
   double delx, dely, delz, r;
   double **x = atom->x;
   int **bond_type = atom->bond_type;
+
+   double **bondstore = fix_bond_history->bondstore;
 
   for (i = 0; i < atom->nlocal; i++) {
     for (m = 0; m < atom->num_bond[i]; m++) {
@@ -148,6 +148,19 @@ void BondBPMProny::store_data()
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
       fix_bond_history->update_atom_value(i, m, 0, r);
+      fix_bond_history->update_atom_value(i, m, 1, r);
+
+      bondstore[m][0] = r;
+      bondstore[m][0] = r;
+
+      const Table *tb = &tables[tabindex[type]];
+
+      // Loop through all Maxwell elements and initialize internal stress variable h
+      for (n = 0; n < tb->ninput; n++ ) {
+        fix_bond_history->update_atom_value(i, m, n+2, 0);
+        bondstore[m][n+2] = 0;
+      }
+
     }
   }
 
@@ -171,7 +184,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   int i1, i2, itmp, n, m, type;
   double delx, dely, delz, delvx, delvy, delvz;
   double e, rsq, r, r0, rinv, smooth, fbond, dot;
-  double tau1, h1, tau_j, gamma_j, h_j, term1, term2;
+  double k_temp, eta_temp, exp_j, gamma_j, tau_j, Hn, rn, term1, term2;
 
   ev_init(eflag, vflag);
 
@@ -188,28 +201,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   double invdim = 1.0 / dim;
 
   double **bondstore = fix_bond_history->bondstore;
-  //const Table *tb = &tables[tabindex[type]];
 
-  /*
-  // First Maxell element
-  tau1 = eta1[type] / k1[type];
-  h1 = 0;
-
-  term1 = exp(-1*dt / tau1) * h1;
-  term2 = (1 - exp(-1*dt / tau1)) / (dt / tau1);
-
-  // Loop through remaining Maxwell Elements
-  for (m = 0; m < tb->ninput; m++) {
-
-    h_j = 0;
-
-    param_lookup(type, m, tau_j, gamma_j);
-
-    term1 += exp(-1*dt / tau_j) * h_j;
-    term2 += gamma_j * (1 - exp(-1*dt / tau_j)) / (dt / tau_j);
- 
-  }
-  */
   for (n = 0; n < nbondlist; n++) {
 
     // skip bond if already broken
@@ -219,6 +211,7 @@ void BondBPMProny::compute(int eflag, int vflag)
     i2 = bondlist[n][1];
     type = bondlist[n][2];
     r0 = bondstore[n][0];
+    rn = bondstore[n][1];
 
     // Ensure pair is always ordered to ensure numerical operations
     // are identical to minimize the possibility that a bond straddling
@@ -229,7 +222,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       i2 = itmp;
     }
 
-    // If bond hasn't been set - should be initialized to zero
+    // If bond hasn't been set - should be initialized to zero -
     if (r0 < EPSILON || std::isnan(r0)) r0 = store_bond(n, i1, i2);
 
     delx = x[i1][0] - x[i2][0];
@@ -247,11 +240,43 @@ void BondBPMProny::compute(int eflag, int vflag)
       continue;
     }
 
+    // rate-independent
     rinv = 1.0 / r;
     if (normalize_flag)
       fbond = -k0[type] * e;
     else
       fbond = k0[type] * (r0 - r);
+
+    // rate-dependent
+    const Table *tb = &tables[tabindex[type]];
+
+    // Loop through Maxwell elements
+    for (m = 0; m < tb->ninput; n++ ) {
+
+      //Get element specific params
+      k_temp = tb->kfile[m];
+      eta_temp = tb->etafile[m];
+      exp_j = tb->expfile[m];
+
+      gamma_j = k_temp / k0[type];
+      tau_j = eta_temp / k_temp;
+
+      // Get bond history variable
+      Hn = bondstore[n][m+2];
+
+      term1 = exp_j * Hn;
+      term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
+
+      fbond += term1 + term2;
+      
+      // Update bond history variable
+      Hn = term1 + term2;
+      bondstore[n][m+2] = Hn;
+
+    }
+
+    // update bondstore with current bond length
+    bondstore[n][1] = rn;
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -297,8 +322,6 @@ void BondBPMProny::allocate()
   const int np1 = atom->nbondtypes + 1;
 
   memory->create(k0, np1, "bond:k0");
-  memory->create(k1, np1, "bond:k1");
-  memory->create(eta1, np1, "bond:eta1");
   memory->create(ecrit, np1, "bond:ecrit");
   memory->create(gamma, np1, "bond:gamma");
 
@@ -313,28 +336,25 @@ void BondBPMProny::allocate()
 
 void BondBPMProny::coeff(int narg, char **arg)
 {
-  if (narg != 8) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (narg != 6) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo, ihi;
   utils::bounds(FLERR, arg[0], 1, atom->nbondtypes, ilo, ihi, error);
   
   double k_zero = utils::numeric(FLERR, arg[1], false, lmp);
-  double k_one = utils::numeric(FLERR, arg[2], false, lmp);
-  double eta_one = utils::numeric(FLERR, arg[3], false, lmp);
-  double ecrit_one = utils::numeric(FLERR, arg[4], false, lmp);
-  double gamma_one = utils::numeric(FLERR, arg[5], false, lmp);
+  double ecrit_one = utils::numeric(FLERR, arg[2], false, lmp);
+  double gamma_one = utils::numeric(FLERR, arg[3], false, lmp);
 
   tables = (Table *) memory->srealloc(tables, (ntables + 1) * sizeof(Table), "bond:tables");
   Table *tb = &tables[ntables];
   null_table(tb);
-  if (comm->me == 0) read_table(tb, arg[6], arg[7]);
+  if (comm->me == 0) read_table(tb, arg[4], arg[5]);
   bcast_table(tb);
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     k0[i] = k_zero;
-    k1[i] = k_one;
     ecrit[i] = ecrit_one;
     gamma[i] = gamma_one;
     setflag[i] = 1;
@@ -395,8 +415,6 @@ void BondBPMProny::write_restart(FILE *fp)
   write_restart_settings(fp);
 
   fwrite(&k0[1], sizeof(double), atom->nbondtypes, fp);
-  fwrite(&k1[1], sizeof(double), atom->nbondtypes, fp);
-  fwrite(&eta1[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&ecrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
 
@@ -416,8 +434,6 @@ void BondBPMProny::read_restart(FILE *fp)
 
   if (comm->me == 0) {
     utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &eta1[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &ecrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
@@ -426,8 +442,6 @@ void BondBPMProny::read_restart(FILE *fp)
   }
 
   MPI_Bcast(&k0[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&k1[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&eta1[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&ecrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
@@ -577,6 +591,7 @@ void BondBPMProny::free_table(Table *tb) // *UPDATED
   memory->destroy(tb->k);
   memory->destroy(tb->eta);
   memory->destroy(tb->expj);
+
 }
 
 /* ----------------------------------------------------------------------
@@ -586,7 +601,7 @@ void BondBPMProny::free_table(Table *tb) // *UPDATED
 void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
 {
   double dt = update->dt;
-
+  
   TableFileReader reader(lmp, file, "bond");
 
   char *line = reader.find_section_start(keyword);
@@ -600,9 +615,9 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
   param_extract(tb, line);
   memory->create(tb->kfile, tb->ninput, "bond:kfile");
   memory->create(tb->etafile, tb->ninput, "bond:etafile");
-  memory->create(tb->expfile,tb->ninput, "bond:expfile");
-
-  // read n,b table values from file
+  memory->create(tb->expfile, tb->ninput, "bond:expfile");
+  
+  // read table values from file
 
   int r0idx = -1;
 
@@ -620,7 +635,7 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
 
       tb->expfile[i] = exp((-dt * tb->kfile[i]) / tb->etafile[i]); // only calculate exponential terms once - store in table
       
-      if ((tb->kfile[i] <= 0) || (tb->etafile[i] <= 0) ) error->one(FLERR, "Bond parameters must positive non-zero");
+      if (tb->kfile[i] <= 0) error->one(FLERR, "Bond parameter must positive non-zero");
 
     } catch (TokenizerException &e) {
       error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword,
@@ -633,7 +648,8 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
 
 /* ----------------------------------------------------------------------
    extract attributes from parameter line in table section
-   format of line: N value 
+   format of line: N value FP fplo fphi EQ r0
+   N is required, other params are optional
 ------------------------------------------------------------------------- */
 
 void BondBPMProny::param_extract(Table *tb, char *line)
@@ -663,6 +679,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
 /* ---------------------------------------------------------------------- */
 
+
  void BondBPMProny::param_lookup(int type, int ID, double &tau_j, double &gamma_j)
 {
     double k_temp, eta_temp;
@@ -672,18 +689,14 @@ void BondBPMProny::param_extract(Table *tb, char *line)
     k_temp = tb->kfile[ID];
     eta_temp = tb->etafile[ID];
 
-    printf("Param Lookup %f \n",k_temp);
-
     tau_j = eta_temp / k_temp;
     gamma_j = k_temp / k0[type];
-
-
 }
 
 /* ----------------------------------------------------------------------
    broadcast read-in table info from proc 0 to other procs
    this function communicates these values in Table:
-     ninput,kfile,etafile,expfile,r0
+     ninput,rfile,efile,ffile,fpflag,fplo,fphi,r0
 ------------------------------------------------------------------------- */
 
 void BondBPMProny::bcast_table(Table *tb) // *UPDATED
@@ -702,7 +715,6 @@ void BondBPMProny::bcast_table(Table *tb) // *UPDATED
   MPI_Bcast(tb->kfile, tb->ninput, MPI_DOUBLE, 0, world);
   MPI_Bcast(tb->etafile, tb->ninput, MPI_DOUBLE, 0, world);
   MPI_Bcast(tb->expfile, tb->ninput, MPI_DOUBLE, 0, world);
-
 }
 
 /* ---------------------------------------------------------------------- */

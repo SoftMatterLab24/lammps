@@ -43,7 +43,7 @@ class BondBPMProny : public BondBPM {
   //void unpack_reverse_comm(int, int *, double *) override;
 
  protected:
-  double *k0, *k1, *eta1 , *ecrit, *gamma;
+  double *k0, *ecrit, *gamma;
   int smooth_flag, normalize_flag;
 
   int index_vol, index_vol0, nmax;
