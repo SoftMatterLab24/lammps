@@ -268,7 +268,9 @@ void BondBPMProny::compute(int eflag, int vflag)
       term1 = exp_j * Hn;
       term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
 
-      fbond += term1 + term2;
+      //printf("term1 %f | term2 %f\n",term1,term2);
+
+      fbond += 1* (term1 + term2);
       
       // Update bond history variable
       Hn = term1 + term2;
@@ -277,7 +279,7 @@ void BondBPMProny::compute(int eflag, int vflag)
     }
 
     // update bondstore with current bond length
-    bondstore[n][1] = rn;
+    bondstore[n][1] = r;
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -296,6 +298,8 @@ void BondBPMProny::compute(int eflag, int vflag)
       smooth = 1 - smooth;
       fbond *= smooth;
     }
+
+    printf("%f\n",fbond);
 
     if (newton_bond || i1 < nlocal) {
       f[i1][0] += delx * fbond;
@@ -487,11 +491,10 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   double r = sqrt(rsq);
   double rinv = 1.0 / r;
-  double e = (r - r0) / r0;
 
   double r0, rn;
   double k_temp, eta_temp, exp_j, gamma_j, tau_j, Hn, term1, term2;
-  
+
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
       r0 = fix_bond_history->get_atom_value(i, n, 0);
@@ -519,6 +522,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
     }
   }
+
+  double e = (r - r0) / r0;
 
   //rate-independent
   if (normalize_flag)
