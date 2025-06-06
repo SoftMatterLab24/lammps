@@ -49,6 +49,7 @@ class BondBPMProny : public BondBPM {
   int index_vol, index_vol0, nmax;
   char *id_fix_property_bond;
   double *vol_current, *dvol0;
+  double *len_current, **H;
 
   struct Table {
    int ninput, fpflag;

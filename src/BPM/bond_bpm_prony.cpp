@@ -36,7 +36,7 @@ using namespace LAMMPS_NS;
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
     BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr),
-    id_fix_property_bond(nullptr), vol_current(nullptr), dvol0(nullptr)
+    id_fix_property_bond(nullptr), 
 {
   partial_flag = 1;
   smooth_flag = 1;
@@ -46,7 +46,8 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   ntables = 0;
   tables = nullptr;
 
-  nhistory = 3;
+  nhistory = 2;
+  update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
   single_extra = 1;
@@ -126,7 +127,7 @@ void BondBPMProny::store_data()
   double **x = atom->x;
   int **bond_type = atom->bond_type;
 
-   double **bondstore = fix_bond_history->bondstore;
+  double **bondstore = fix_bond_history->bondstore;
 
   for (i = 0; i < atom->nlocal; i++) {
     for (m = 0; m < atom->num_bond[i]; m++) {
@@ -151,7 +152,7 @@ void BondBPMProny::store_data()
       fix_bond_history->update_atom_value(i, m, 1, r);
 
       bondstore[m][0] = r;
-      bondstore[m][0] = r;
+      bondstore[m][1] = r;
 
       const Table *tb = &tables[tabindex[type]];
 
@@ -176,15 +177,14 @@ void BondBPMProny::compute(int eflag, int vflag)
   if (!fix_bond_history->stored_flag) {
     fix_bond_history->stored_flag = true;
     store_data();
-
   }
 
   if (hybrid_flag) fix_bond_history->compress_history();
 
   int i1, i2, itmp, n, m, type;
   double delx, dely, delz, delvx, delvy, delvz;
-  double e, rsq, r, r0, rinv, smooth, fbond, dot;
-  double k_temp, eta_temp, exp_j, gamma_j, tau_j, Hn, rn, term1, term2;
+  double e, rsq, r, r0, rn , rtemp, rinv,  smooth, fbond, dot;
+  double k_temp, eta_temp, exp_j, gamma_j, tau_j, Hn, term1, term2, term3;
 
   ev_init(eflag, vflag);
 
@@ -213,6 +213,8 @@ void BondBPMProny::compute(int eflag, int vflag)
     r0 = bondstore[n][0];
     rn = bondstore[n][1];
 
+    const Table *tb = &tables[tabindex[type]];
+
     // Ensure pair is always ordered to ensure numerical operations
     // are identical to minimize the possibility that a bond straddling
     // an mpi grid (newton off) doesn't break on one proc but not the other
@@ -233,10 +235,13 @@ void BondBPMProny::compute(int eflag, int vflag)
     r = sqrt(rsq);
     e = (r - r0) / r0;
 
+    bondstore[n][1] = r;
+   
+    //printf("Bond lengths | r %f | rn %f \n",r,rn);
+
     if ((fabs(e) > ecrit[type]) && break_flag) {
       bondlist[n][2] = 0;
       process_broken(i1, i2);
-
       continue;
     }
 
@@ -248,8 +253,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       fbond = k0[type] * (r0 - r);
 
     // rate-dependent
-    const Table *tb = &tables[tabindex[type]];
-
     // Loop through Maxwell elements
     for (m = 0; m < tb->ninput; m++ ) {
 
@@ -264,11 +267,18 @@ void BondBPMProny::compute(int eflag, int vflag)
       // Get bond history variable
       Hn = bondstore[n][m+2];
 
-      //printf("bondid %i, maxwell index: %i, exp: %f, H: %f\n",m,exp_j,Hn);
-      term1 = exp_j * Hn;
-      term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
+      //printf("in loop bondinex %i, bondstore %f , length r %f, maxwell index %i\n",n,bondstore[n][1],r,m+2);
 
-      //printf("term1 %f | term2 %f\n",term1,term2);
+      if ((1-exp_j) < 0.0000001) {
+        term3 = 1;
+      } else { 
+        term3 = (1 - exp_j) / (dt / tau_j);
+      }
+  
+      term1 = exp_j * Hn;
+      term2 = gamma_j * k0[type] * (rn - r) * term3;
+
+      //printf("term1 %f | term2 %f | term3 %f | \n",term1,term2,term3);
 
       fbond += 1* (term1 + term2);
       
@@ -278,8 +288,10 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     }
 
+    //printf("Bond force: %f, Elastic force: %f, term1: %f, term2 %f, r: %f, rn: %f\n",fbond,fbond_el,term1,term2,r,rn);
+    //printf("%f \n ", -fbond);
     // update bondstore with current bond length
-    bondstore[n][1] = r;
+    //bondstore[n][1] = r;
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -298,8 +310,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       smooth = 1 - smooth;
       fbond *= smooth;
     }
-
-    printf("%f\n",fbond);
 
     if (newton_bond || i1 < nlocal) {
       f[i1][0] += delx * fbond;
@@ -406,6 +416,9 @@ void BondBPMProny::settings(int narg, char **arg)
     }
   }
 
+  comm_forward = 1;
+  comm_reverse = 1;
+
   if (smooth_flag && !break_flag)
     error->all(FLERR, "Illegal bond bpm command, must turn off smoothing with break no option");
 }
@@ -488,6 +501,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   const Table *tb = &tables[tabindex[type]];
   double dt = update->dt;
+  double **bondstore = fix_bond_history->bondstore;
 
   double r = sqrt(rsq);
   double rinv = 1.0 / r;
@@ -497,8 +511,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
-      r0 = fix_bond_history->get_atom_value(i, n, 0);
-      rn = fix_bond_history->get_atom_value(i, n, 1);
+      r0 = bondstore[n][0];
+      rn = bondstore[n][1];
 
       // Loop through Maxwell elements
       for (int m = 0; m < tb->ninput; m++ ) {
@@ -511,12 +525,12 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
         gamma_j = k_temp / k0[type];
         tau_j = eta_temp / k_temp;
 
-        Hn = fix_bond_history->get_atom_value(i, n, m+2);
+        Hn = bondstore[n][m+2];
 
         term1 = exp_j * Hn;
         term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
 
-        fforce += term1 + term2;
+        fforce += (term1 + term2);
 
       }
 
@@ -560,27 +574,27 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 }
 
 /* ---------------------------------------------------------------------- */
-
-//int BondBPMProny::pack_reverse_comm(int n, int first, double *buf)
-//{
-//  int i, m, last;
-//  m = 0;
-//  last = first + n;
-//  for (i = first; i < last; i++) buf[m++] = vol_current[i];
-//  return m;
-//}
+/* 
+int BondBPMProny::pack_reverse_comm(int n, int first, double *buf)
+{
+  int i, m, last;
+  m = 0;
+  last = first + n;
+  for (i = first; i < last; i++) buf[m++] = bondstore[i][1];
+  return m;
+}
 
 /* ---------------------------------------------------------------------- */
-
-//void BondBPMProny::unpack_reverse_comm(int n, int *list, double *buf)
-//{
-//  int i, j, m;
-//  m = 0;
-//  for (i = 0; i < n; i++) {
-//    j = list[i];
-//    vol_current[j] += buf[m++];
-//  }
-//}
+/*
+void BondBPMProny::unpack_reverse_comm(int n, int *list, double *buf)
+{
+  int i, j, m;
+  m = 0;
+  for (i = 0; i < n; i++) {
+    j = list[i];
+    bondstore[j][1] += buf[m++];
+  }
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -590,20 +604,22 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 //  m = 0;
 //  for (i = 0; i < n; i++) {
 //    j = list[i];
-//    buf[m++] = vol_current[j];
+//    buf[m++] = bondstore[j][1];
 //  }
 //  return m;
 //}
 
-/* ---------------------------------------------------------------------- */
 
-//void BondBPMProny::unpack_forward_comm(int n, int first, double *buf)
-//{
-//  int i, m, last;
-//  m = 0;
-//  last = first + n;
-//  for (i = first; i < last; i++) vol_current[i] = buf[m++];
-//}
+/* ---------------------------------------------------------------------- */
+/*
+void BondBPMProny::unpack_forward_comm(int n, int first, double *buf)
+{
+  int i, m, last;
+  m = 0;
+  last = first + n;
+  for (i = first; i < last; i++) bondstore[i][1] = buf[m++];
+}
+
 
 /* ----------------------------------------------------------------------
     read from table file
@@ -669,7 +685,12 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
       tb->kfile[i] = values.next_double(); 
       tb->etafile[i] = values.next_double();
 
-      tb->expfile[i] = exp((-dt * tb->kfile[i]) / tb->etafile[i]); // only calculate exponential terms once - store in table
+      double k = tb->kfile[i];
+      double et = tb->etafile[i];
+
+      printf("timestep %f | tau %f \n", dt, k/et);
+
+      tb->expfile[i] = exp((-dt *  tb->kfile[i]) / tb->etafile[i]); // only calculate exponential terms once - store in table
       
       if (tb->kfile[i] <= 0) error->one(FLERR, "Bond parameter must positive non-zero");
 
@@ -711,6 +732,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
   }
 
   if (tb->ninput == 0) error->one(FLERR, "Bond table parameters did not set N");
+  nhistory = 2 + tb->ninput;
 }
 
 /* ---------------------------------------------------------------------- */
