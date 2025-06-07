@@ -36,7 +36,7 @@ using namespace LAMMPS_NS;
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
     BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr),
-    id_fix_property_bond(nullptr), 
+    id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
@@ -46,7 +46,7 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   ntables = 0;
   tables = nullptr;
 
-  nhistory = 2;
+  nhistory = 100;
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
@@ -124,7 +124,9 @@ void BondBPMProny::store_data()
 {
   int i, j, n, m, type;
   double delx, dely, delz, r;
+  double k_temp, eta_temp, exp_j;
   double **x = atom->x;
+  double dt = update->dt;
   int **bond_type = atom->bond_type;
 
   double **bondstore = fix_bond_history->bondstore;
@@ -156,10 +158,20 @@ void BondBPMProny::store_data()
 
       const Table *tb = &tables[tabindex[type]];
 
-      // Loop through all Maxwell elements and initialize internal stress variable h
-      for (n = 0; n < tb->ninput; n++ ) {
+      // Loop through all Maxwell elements and initialize variable
+      for (int n = 0; n < tb->ninput; n++ ) {
+
+        // Compute exponential terms
+        k_temp = tb->kfile[n];
+        eta_temp = tb->etafile[n];
+
+        exp_j = exp(-dt * k_temp / eta_temp);
+        tb->expfile[n] = exp_j;
+
+        // Internal stress variable
         fix_bond_history->update_atom_value(i, m, n+2, 0);
         bondstore[m][n+2] = 0;
+
       }
 
     }
@@ -235,9 +247,8 @@ void BondBPMProny::compute(int eflag, int vflag)
     r = sqrt(rsq);
     e = (r - r0) / r0;
 
+    // update bond length in bondstore
     bondstore[n][1] = r;
-   
-    //printf("Bond lengths | r %f | rn %f \n",r,rn);
 
     if ((fabs(e) > ecrit[type]) && break_flag) {
       bondlist[n][2] = 0;
@@ -245,14 +256,14 @@ void BondBPMProny::compute(int eflag, int vflag)
       continue;
     }
 
-    // rate-independent
+    // rate-independent part of bond force
     rinv = 1.0 / r;
     if (normalize_flag)
       fbond = -k0[type] * e;
     else
       fbond = k0[type] * (r0 - r);
 
-    // rate-dependent
+    // rate-dependent part of bond force
     // Loop through Maxwell elements
     for (m = 0; m < tb->ninput; m++ ) {
 
@@ -266,19 +277,9 @@ void BondBPMProny::compute(int eflag, int vflag)
 
       // Get bond history variable
       Hn = bondstore[n][m+2];
-
-      //printf("in loop bondinex %i, bondstore %f , length r %f, maxwell index %i\n",n,bondstore[n][1],r,m+2);
-
-      if ((1-exp_j) < 0.0000001) {
-        term3 = 1;
-      } else { 
-        term3 = (1 - exp_j) / (dt / tau_j);
-      }
   
       term1 = exp_j * Hn;
-      term2 = gamma_j * k0[type] * (rn - r) * term3;
-
-      //printf("term1 %f | term2 %f | term3 %f | \n",term1,term2,term3);
+      term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
 
       fbond += 1* (term1 + term2);
       
@@ -288,19 +289,12 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     }
 
-    //printf("Bond force: %f, Elastic force: %f, term1: %f, term2 %f, r: %f, rn: %f\n",fbond,fbond_el,term1,term2,r,rn);
-    //printf("%f \n ", -fbond);
-    // update bondstore with current bond length
-    //bondstore[n][1] = r;
-
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
     delvz = v[i1][2] - v[i2][2];
     dot = delx * delvx + dely * delvy + delz * delvz;
     fbond -= gamma[type] * dot * rinv;
     fbond *= rinv;
-
-    //printf("Bond force %f \n",fbond);
 
     if (smooth_flag) {
       smooth = (r - r0) / (r0 * ecrit[type]);
@@ -379,6 +373,9 @@ void BondBPMProny::coeff(int narg, char **arg)
   }
 
   if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients");
+
+  nhistory = 2 + tb->ninput;
+
 }
 
 /* ----------------------------------------------------------------------
@@ -573,54 +570,6 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   return 0.0;
 }
 
-/* ---------------------------------------------------------------------- */
-/* 
-int BondBPMProny::pack_reverse_comm(int n, int first, double *buf)
-{
-  int i, m, last;
-  m = 0;
-  last = first + n;
-  for (i = first; i < last; i++) buf[m++] = bondstore[i][1];
-  return m;
-}
-
-/* ---------------------------------------------------------------------- */
-/*
-void BondBPMProny::unpack_reverse_comm(int n, int *list, double *buf)
-{
-  int i, j, m;
-  m = 0;
-  for (i = 0; i < n; i++) {
-    j = list[i];
-    bondstore[j][1] += buf[m++];
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
-//int BondBPMProny::pack_forward_comm(int n, int *list, double *buf, int /*pbc_flag*/, int * /*pbc*/)
-//{
-//  int i, j, m;
-//  m = 0;
-//  for (i = 0; i < n; i++) {
-//    j = list[i];
-//    buf[m++] = bondstore[j][1];
-//  }
-//  return m;
-//}
-
-
-/* ---------------------------------------------------------------------- */
-/*
-void BondBPMProny::unpack_forward_comm(int n, int first, double *buf)
-{
-  int i, m, last;
-  m = 0;
-  last = first + n;
-  for (i = first; i < last; i++) bondstore[i][1] = buf[m++];
-}
-
-
 /* ----------------------------------------------------------------------
     read from table file
  ------------------------------------------------------------------------- */
@@ -684,13 +633,7 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
       values.next_int();
       tb->kfile[i] = values.next_double(); 
       tb->etafile[i] = values.next_double();
-
-      double k = tb->kfile[i];
-      double et = tb->etafile[i];
-
-      printf("timestep %f | tau %f \n", dt, k/et);
-
-      tb->expfile[i] = exp((-dt *  tb->kfile[i]) / tb->etafile[i]); // only calculate exponential terms once - store in table
+      tb->expfile[i] = 0;
       
       if (tb->kfile[i] <= 0) error->one(FLERR, "Bond parameter must positive non-zero");
 
@@ -732,7 +675,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
   }
 
   if (tb->ninput == 0) error->one(FLERR, "Bond table parameters did not set N");
-  nhistory = 2 + tb->ninput;
+  printf("N entries %i\n",tb->ninput);
 }
 
 /* ---------------------------------------------------------------------- */
