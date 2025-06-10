@@ -50,6 +50,7 @@ class BondBPMProny : public BondBPM {
   char *id_fix_property_bond;
   double *vol_current, *dvol0;
   double *len_current, **H;
+  double dt_temp;
 
   struct Table {
    int ninput, fpflag;
@@ -72,7 +73,7 @@ class BondBPMProny : public BondBPM {
   void bcast_table(Table *);
   
   void param_extract(Table *, char *);
-  void param_lookup(int, int, double &, double &);
+  void update_table(int);
 };
 
 }    // namespace LAMMPS_NS

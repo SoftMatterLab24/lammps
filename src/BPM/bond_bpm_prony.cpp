@@ -57,6 +57,8 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
 
   comm_forward = 0;
   comm_reverse = 0;
+
+  dt_temp = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -123,6 +125,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[l] = exp_j;
+        dt_temp = dt;
 
         // Internal stress variable
         fix_bond_history->update_atom_value(i, m, l+2, 0);
@@ -148,6 +151,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[l] = exp_j;
+        dt_temp = dt;
 
         // Internal stress variable
         fix_bond_history->update_atom_value(j, m, l+2, 0);
@@ -211,6 +215,7 @@ void BondBPMProny::store_data()
 
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[n] = exp_j;
+        dt_temp = dt;
 
         // Internal stress variable
         fix_bond_history->update_atom_value(i, m, n+2, 0);
@@ -269,6 +274,10 @@ void BondBPMProny::compute(int eflag, int vflag)
     r0 = bondstore[n][0];
     rn = bondstore[n][1];
 
+    if (!(dt == dt_temp)) {
+      update_table(type);
+    }
+
     const Table *tb = &tables[tabindex[type]];
 
     // Ensure pair is always ordered to ensure numerical operations
@@ -315,6 +324,8 @@ void BondBPMProny::compute(int eflag, int vflag)
       k_temp = tb->kfile[m];
       eta_temp = tb->etafile[m];
       exp_j = tb->expfile[m];
+
+      //printf("eta: %f\n",eta_temp);
 
       gamma_j = k_temp / k0[type];
       tau_j = eta_temp / k_temp;
@@ -680,8 +691,6 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
       tb->kfile[i] = values.next_double(); 
       tb->etafile[i] = values.next_double();
       tb->expfile[i] = 0;
-
-      printf("Eta %f \n",tb->etafile[i]);
       
       if (tb->kfile[i] <= 0) error->one(FLERR, "Bond parameter must positive non-zero");
 
@@ -730,17 +739,21 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
 /* ---------------------------------------------------------------------- */
 
- void BondBPMProny::param_lookup(int type, int ID, double &tau_j, double &gamma_j)
-{
-    double k_temp, eta_temp;
-    const Table *tb = &tables[tabindex[type]];
-    
-    // Grab properties for (ID + 1)th Maxwell element (first element read in as coeff)
-    k_temp = tb->kfile[ID];
-    eta_temp = tb->etafile[ID];
+ void BondBPMProny::update_table(int type)
+{   
+  double dt = update->dt;
+  double k_temp, eta_temp, exp_j;
+  const Table *tb = &tables[tabindex[type]];
+    //printf("Table updated\n");
+    for (int m = 0; m < tb->ninput; m++ ) {
 
-    tau_j = eta_temp / k_temp;
-    gamma_j = k_temp / k0[type];
+      k_temp = tb->kfile[m];
+      eta_temp = tb->etafile[m]; 
+
+      exp_j = exp(-dt * k_temp / eta_temp);
+      tb->expfile[m] = exp_j;
+    }
+  dt_temp = dt;
 }
 
 /* ----------------------------------------------------------------------
