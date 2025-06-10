@@ -46,7 +46,7 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   ntables = 0;
   tables = nullptr;
 
-  nhistory = 100;
+  nhistory = 2;
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
@@ -89,10 +89,15 @@ BondBPMProny::~BondBPMProny()
 
 double BondBPMProny::store_bond(int n, int i, int j)
 {
+  int type;
   double delx, dely, delz, r;
+  double k_temp, eta_temp, exp_j;
   double **x = atom->x;
+  double dt = update->dt;
   double **bondstore = fix_bond_history->bondstore;
   tagint *tag = atom->tag;
+
+  int **bond_type = atom->bond_type;
 
   delx = x[i][0] - x[j][0];
   dely = x[i][1] - x[j][1];
@@ -100,16 +105,55 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
   r = sqrt(delx * delx + dely * dely + delz * delz);
   bondstore[n][0] = r;
+  bondstore[n][1] = r;
 
   if (i < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[i]; m++) {
-      if (atom->bond_atom[i][m] == tag[j]) { fix_bond_history->update_atom_value(i, m, 0, r); }
+      if (atom->bond_atom[i][m] == tag[j]) { 
+        fix_bond_history->update_atom_value(i, m, 0, r); 
+        fix_bond_history->update_atom_value(i, m, 1, r); 
+        
+        type = bond_type[i][m];
+        const Table *tb = &tables[tabindex[type]];
+        for (int l = 0; l < tb->ninput; l++ ) {
+
+        // Compute exponential terms
+        k_temp = tb->kfile[l];
+        eta_temp = tb->etafile[l];
+
+        exp_j = exp(-dt * k_temp / eta_temp);
+        tb->expfile[l] = exp_j;
+
+        // Internal stress variable
+        fix_bond_history->update_atom_value(i, m, l+2, 0);
+        bondstore[n][l+2] = 0;
+        }  
+      }
     }
   }
 
   if (j < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[j]; m++) {
-      if (atom->bond_atom[j][m] == tag[i]) { fix_bond_history->update_atom_value(j, m, 0, r); }
+      if (atom->bond_atom[j][m] == tag[i]) { 
+        fix_bond_history->update_atom_value(j, m, 0, r); 
+        fix_bond_history->update_atom_value(j, m, 1, r); 
+        
+        type = bond_type[i][m];
+        const Table *tb = &tables[tabindex[type]];
+        for (int l = 0; l < tb->ninput; l++ ) {
+
+        // Compute exponential terms
+        k_temp = tb->kfile[l];
+        eta_temp = tb->etafile[l];
+
+        exp_j = exp(-dt * k_temp / eta_temp);
+        tb->expfile[l] = exp_j;
+
+        // Internal stress variable
+        fix_bond_history->update_atom_value(j, m, l+2, 0);
+        bondstore[n][l+2] = 0;
+        }
+      }
     }
   }
 
@@ -337,6 +381,7 @@ void BondBPMProny::allocate()
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
   for (int i = 1; i < np1; i++) setflag[i] = 0;
+
 }
 
 /* ----------------------------------------------------------------------
@@ -374,8 +419,6 @@ void BondBPMProny::coeff(int narg, char **arg)
 
   if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients");
 
-  nhistory = 2 + tb->ninput;
-
 }
 
 /* ----------------------------------------------------------------------
@@ -395,10 +438,13 @@ void BondBPMProny::init_style()
 
 void BondBPMProny::settings(int narg, char **arg)
 {
+  
+  nhistory = utils::numeric(FLERR, arg[0], false, lmp) + 2;
+  
   BondBPM::settings(narg, arg);
 
-  int iarg;
-  for (std::size_t i = 0; i < leftover_iarg.size(); i++) {
+  int iarg; 
+  for (std::size_t i = 1; i < leftover_iarg.size(); i++) {
     iarg = leftover_iarg[i];
     if (strcmp(arg[iarg], "smooth") == 0) {
       if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for smooth");
@@ -634,6 +680,8 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
       tb->kfile[i] = values.next_double(); 
       tb->etafile[i] = values.next_double();
       tb->expfile[i] = 0;
+
+      printf("Eta %f \n",tb->etafile[i]);
       
       if (tb->kfile[i] <= 0) error->one(FLERR, "Bond parameter must positive non-zero");
 
@@ -675,11 +723,12 @@ void BondBPMProny::param_extract(Table *tb, char *line)
   }
 
   if (tb->ninput == 0) error->one(FLERR, "Bond table parameters did not set N");
-  printf("N entries %i\n",tb->ninput);
+
+  if (!(tb->ninput == nhistory - 2)) error->one(FLERR, "Mismatched args for bond table parameter N");
+  //printf("N entries %i\n",tb->ninput);
 }
 
 /* ---------------------------------------------------------------------- */
-
 
  void BondBPMProny::param_lookup(int type, int ID, double &tau_j, double &gamma_j)
 {
