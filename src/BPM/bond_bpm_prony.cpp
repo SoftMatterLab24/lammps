@@ -205,13 +205,15 @@ void BondBPMProny::store_data()
       bondstore[m][1] = r;
 
       const Table *tb = &tables[tabindex[type]];
-
+    
       // Loop through all Maxwell elements and initialize variable
       for (int n = 0; n < tb->ninput; n++ ) {
 
         // Compute exponential terms
         k_temp = tb->kfile[n];
         eta_temp = tb->etafile[n];
+
+        
 
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[n] = exp_j;
@@ -264,7 +266,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   double **bondstore = fix_bond_history->bondstore;
 
   for (n = 0; n < nbondlist; n++) {
-
+    
     // skip bond if already broken
     if (bondlist[n][2] <= 0) continue;
 
@@ -279,10 +281,11 @@ void BondBPMProny::compute(int eflag, int vflag)
     }
 
     const Table *tb = &tables[tabindex[type]];
+    //printf("Type: %i,Number of elements %i\n",type,tb->ninput);
 
     // Ensure pair is always ordered to ensure numerical operations
     // are identical to minimize the possibility that a bond straddling
-    // an mpi grid (newton off) doesn't break on one proc but not the other
+    // an mpi grid (newton off) doesn't break on one proc but not the other 
     if (tag[i2] < tag[i1]) {
       itmp = i1;
       i1 = i2;
@@ -318,7 +321,10 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     // rate-dependent part of bond force
     // Loop through Maxwell elements
+    //printf("num elements %i\n",tb->ninput); tb->ninput
     for (m = 0; m < tb->ninput; m++ ) {
+      
+      //printf("hey there\n");
 
       //Get element specific params
       k_temp = tb->kfile[m];
@@ -334,7 +340,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       Hn = bondstore[n][m+2];
   
       term1 = exp_j * Hn;
-      term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
+      term2 = k_temp * (rn - r) * (1 - exp_j) / (dt / tau_j);
 
       fbond += 1* (term1 + term2);
       
@@ -343,6 +349,8 @@ void BondBPMProny::compute(int eflag, int vflag)
       bondstore[n][m+2] = Hn;
 
     }
+
+    //if (n==1) printf("bondforce %f\n",fbond);
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -401,6 +409,7 @@ void BondBPMProny::allocate()
 
 void BondBPMProny::coeff(int narg, char **arg)
 {
+
   if (narg != 6) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
@@ -565,10 +574,12 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
-      r0 = bondstore[n][0];
-      rn = bondstore[n][1];
+      r0 = fix_bond_history->get_atom_value(i, n, 0);
+      rn = fix_bond_history->get_atom_value(i, n, 1);
 
-      // Loop through Maxwell elements
+      //if (n==1) printf("bondlength %f %f\n",r0,rn);
+
+      // Loop through Maxwell elements tb->ninput
       for (int m = 0; m < tb->ninput; m++ ) {
 
         //Get element specific params
@@ -579,12 +590,13 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
         gamma_j = k_temp / k0[type];
         tau_j = eta_temp / k_temp;
 
-        Hn = bondstore[n][m+2];
+        Hn = fix_bond_history->get_atom_value(i, n, m+2);
 
         term1 = exp_j * Hn;
         term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
 
         fforce += (term1 + term2);
+        //if (n==1) printf("dist %f force %f\n",r,fforce);
 
       }
 
@@ -744,7 +756,6 @@ void BondBPMProny::param_extract(Table *tb, char *line)
   double dt = update->dt;
   double k_temp, eta_temp, exp_j;
   const Table *tb = &tables[tabindex[type]];
-    //printf("Table updated\n");
     for (int m = 0; m < tb->ninput; m++ ) {
 
       k_temp = tb->kfile[m];
