@@ -35,12 +35,13 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr),
+    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), alpha(nullptr),
     id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
   normalize_flag = 0;
+  nonlinear_flag = 0;
   writedata = 0;
 
   ntables = 0;
@@ -80,6 +81,7 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(k0);
     memory->destroy(ecrit);
     memory->destroy(gamma);
+    memory->destroy(alpha);
     
   }
 
@@ -214,7 +216,6 @@ void BondBPMProny::store_data()
         eta_temp = tb->etafile[n];
 
         
-
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[n] = exp_j;
         dt_temp = dt;
@@ -314,9 +315,11 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     // rate-independent part of bond force
     rinv = 1.0 / r;
-    if (normalize_flag)
+    if (normalize_flag) {
       fbond = -k0[type] * e;
-    else
+    } else if (nonlinear_flag) {
+      fbond =  k0[type] * pow((r0 - r),alpha[i]);
+    } else
       fbond = k0[type] * (r0 - r);
 
     // rate-dependent part of bond force
@@ -342,7 +345,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       term1 = exp_j * Hn;
       term2 = k_temp * (rn - r) * (1 - exp_j) / (dt / tau_j);
 
-      fbond += 1* (term1 + term2);
+      fbond += (term1 + term2);
       
       // Update bond history variable
       Hn = term1 + term2;
@@ -396,6 +399,7 @@ void BondBPMProny::allocate()
   memory->create(k0, np1, "bond:k0");
   memory->create(ecrit, np1, "bond:ecrit");
   memory->create(gamma, np1, "bond:gamma");
+  memory->create(alpha,np1,"bond:alpha");
 
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
@@ -426,12 +430,28 @@ void BondBPMProny::coeff(int narg, char **arg)
   if (comm->me == 0) read_table(tb, arg[4], arg[5]);
   bcast_table(tb);
 
+  // Set defaults
+  double Alph = 1;
+
+  //parse remaining args
+  int iarg = 6;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg],"nonlinear") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
+      Alph = utils::numeric(FLERR, arg[iarg+1], false, lmp);
+      nonlinear_flag = 1;
+      iarg += 2;
+    } else error->all(FLERR,"Incorrect args for bond coefficients");
+  }
+
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     k0[i] = k_zero;
     ecrit[i] = ecrit_one;
     gamma[i] = gamma_one;
+    alpha[i] = Alph;
     setflag[i] = 1;
+    
     count++;
 
     if (1.0 + ecrit[i] > max_stretch) max_stretch = 1.0 + ecrit[i];
@@ -517,6 +537,7 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &ecrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &alpha[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -525,6 +546,7 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&k0[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&ecrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&alpha[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
@@ -540,6 +562,7 @@ void BondBPMProny::write_restart_settings(FILE *fp)
 {
   fwrite(&smooth_flag, sizeof(int), 1, fp);
   fwrite(&normalize_flag, sizeof(int), 1, fp);
+  fwrite(&nonlinear_flag, sizeof(int), 1, fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -551,9 +574,11 @@ void BondBPMProny::read_restart_settings(FILE *fp)
   if (comm->me == 0) {
     utils::sfread(FLERR, &smooth_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &normalize_flag, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &nonlinear_flag, sizeof(int), 1, fp, nullptr, error);
   }
   MPI_Bcast(&smooth_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&normalize_flag, 1, MPI_INT, 0, world);
+  MPI_Bcast(&nonlinear_flag, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -579,7 +604,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
       //if (n==1) printf("bondlength %f %f\n",r0,rn);
 
-      // Loop through Maxwell elements tb->ninput
+      // Loop through Maxwell elements (rate-dependent)
       for (int m = 0; m < tb->ninput; m++ ) {
 
         //Get element specific params
@@ -603,12 +628,15 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     }
   }
 
-  double e = (r - r0) / r0;
 
   //rate-independent
-  if (normalize_flag)
+  double e = (r - r0) / r0;
+
+  if (normalize_flag) {
     fforce += -k0[type] * e;
-  else
+  } else if (nonlinear_flag) {
+    fforce += k0[type] * pow((r0 - r),alpha[i]);
+  } else
     fforce += k0[type] * (r0 - r);
 
   double **x = atom->x;
