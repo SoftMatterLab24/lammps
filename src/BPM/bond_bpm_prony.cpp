@@ -318,8 +318,15 @@ void BondBPMProny::compute(int eflag, int vflag)
     if (normalize_flag) {
       fbond = -k0[type] * e;
     } else if (nonlinear_flag) {
-      fbond =  k0[type] * pow((r0 - r),alpha[i]);
+      double dr = (r0 - r);
+      if (dr < 0) {
+        fbond = -k0[type] * pow(-dr,alpha[type]);
+      } else {
+        fbond = k0[type] * pow(dr,alpha[type]);
+      }
+      printf("nonlinear fbond: %f | alpha: %f | linear fbond %f \n",fbond,alpha[type],k0[type] * (r0 - r));
     } else
+      printf("linear fbond: %f \n",fbond);
       fbond = k0[type] * (r0 - r);
 
     // rate-dependent part of bond force
@@ -414,7 +421,7 @@ void BondBPMProny::allocate()
 void BondBPMProny::coeff(int narg, char **arg)
 {
 
-  if (narg != 6) error->all(FLERR, "Incorrect args for bond coefficients");
+  //if (narg != 6) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -635,7 +642,12 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   if (normalize_flag) {
     fforce += -k0[type] * e;
   } else if (nonlinear_flag) {
-    fforce += k0[type] * pow((r0 - r),alpha[i]);
+    double dr = (r0 - r);
+    if (dr < 0) {
+      fforce += -k0[type] * pow(-dr,alpha[type]);
+    } else {
+      fforce += k0[type] * pow(dr,alpha[type]);
+    }
   } else
     fforce += k0[type] * (r0 - r);
 
