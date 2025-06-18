@@ -324,9 +324,9 @@ void BondBPMProny::compute(int eflag, int vflag)
       } else {
         fbond = k0[type] * pow(dr,alpha[type]);
       }
-      printf("nonlinear fbond: %f | alpha: %f | linear fbond %f \n",fbond,alpha[type],k0[type] * (r0 - r));
+      //printf("nonlinear fbond: %f | alpha: %f | linear fbond %f \n",fbond,alpha[type],k0[type] * (r0 - r));
     } else
-      printf("linear fbond: %f \n",fbond);
+      //printf("linear fbond: %f \n",fbond);
       fbond = k0[type] * (r0 - r);
 
     // rate-dependent part of bond force
