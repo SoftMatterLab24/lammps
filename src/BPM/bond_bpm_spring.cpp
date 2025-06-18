@@ -566,7 +566,7 @@ double BondBPMSpring::single(int type, double rsq, int i, int j, double &fforce)
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) r0 = fix_bond_history->get_atom_value(i, n, 0);
   }
-
+  
   double r = sqrt(rsq);
   double rinv = 1.0 / r;
   double e = (r - r0) / r0;

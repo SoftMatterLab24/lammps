@@ -277,6 +277,8 @@ void BondBPMProny::compute(int eflag, int vflag)
     r0 = bondstore[n][0];
     rn = bondstore[n][1];
 
+    //printf("C bondlength %f %f\n",r0,rn);
+
     if (!(dt == dt_temp)) {
       update_table(type);
     }
@@ -312,7 +314,8 @@ void BondBPMProny::compute(int eflag, int vflag)
       process_broken(i1, i2);
       continue;
     }
-
+    
+    
     // rate-independent part of bond force
     rinv = 1.0 / r;
     if (normalize_flag) {
@@ -324,10 +327,18 @@ void BondBPMProny::compute(int eflag, int vflag)
       } else {
         fbond = k0[type] * pow(dr,alpha[type]);
       }
-      //printf("nonlinear fbond: %f | alpha: %f | linear fbond %f \n",fbond,alpha[type],k0[type] * (r0 - r));
     } else
-      //printf("linear fbond: %f \n",fbond);
       fbond = k0[type] * (r0 - r);
+    
+
+    // rate-independent part of bond force
+    /*
+    rinv = 1.0 / r;
+    if (normalize_flag)
+      fbond = -k0[type] * e;
+    else
+      fbond = k0[type] * (r0 - r);
+    */
 
     // rate-dependent part of bond force
     // Loop through Maxwell elements
@@ -360,7 +371,7 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     }
 
-    //if (n==1) printf("bondforce %f\n",fbond);
+    //printf("bondforce %f\n",fbond);
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -420,7 +431,6 @@ void BondBPMProny::allocate()
 
 void BondBPMProny::coeff(int narg, char **arg)
 {
-
   //if (narg != 6) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
@@ -485,7 +495,6 @@ void BondBPMProny::init_style()
 
 void BondBPMProny::settings(int narg, char **arg)
 {
-  
   nhistory = utils::numeric(FLERR, arg[0], false, lmp) + 2;
   
   BondBPM::settings(narg, arg);
@@ -511,6 +520,7 @@ void BondBPMProny::settings(int narg, char **arg)
 
   if (smooth_flag && !break_flag)
     error->all(FLERR, "Illegal bond bpm command, must turn off smoothing with break no option");
+
 }
 
 /* ----------------------------------------------------------------------
@@ -525,6 +535,7 @@ void BondBPMProny::write_restart(FILE *fp)
   fwrite(&k0[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&ecrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&alpha[1], sizeof(double), atom->nbondtypes, fp);
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
@@ -606,10 +617,15 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
+
+      //r0 = bondstore[n][0];
+      //rn = bondstore[n][1];
+
       r0 = fix_bond_history->get_atom_value(i, n, 0);
       rn = fix_bond_history->get_atom_value(i, n, 1);
 
-      //if (n==1) printf("bondlength %f %f\n",r0,rn);
+      //if (n==0) printf("bondlength %f %f\n",r0,rn);
+      //printf("S bondlength %f %f\n",r0,rn);
 
       // Loop through Maxwell elements (rate-dependent)
       for (int m = 0; m < tb->ninput; m++ ) {
@@ -622,6 +638,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
         gamma_j = k_temp / k0[type];
         tau_j = eta_temp / k_temp;
 
+        //
+        Hn = bondstore[n][m+2];
         Hn = fix_bond_history->get_atom_value(i, n, m+2);
 
         term1 = exp_j * Hn;
@@ -635,9 +653,16 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     }
   }
 
-
   //rate-independent
   double e = (r - r0) / r0;
+  /*
+  if (normalize_flag)
+    fforce += -k0[type] * e;
+  else
+    fforce += k0[type] * (r0 - r);
+  */
+
+  //printf("single force %f\n",fforce);
 
   if (normalize_flag) {
     fforce += -k0[type] * e;
@@ -651,6 +676,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   } else
     fforce += k0[type] * (r0 - r);
 
+  //printf("single force %f\n",fforce);
   double **x = atom->x;
   double **v = atom->v;
   double delx = x[i][0] - x[j][0];
