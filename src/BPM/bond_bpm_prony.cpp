@@ -108,8 +108,8 @@ double BondBPMProny::store_bond(int n, int i, int j)
   delz = x[i][2] - x[j][2];
 
   r = sqrt(delx * delx + dely * dely + delz * delz);
-  bondstore[n][0] = r;
-  bondstore[n][1] = r;
+  //bondstore[n][0] = r;
+  //bondstore[n][1] = r;
 
   if (i < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[i]; m++) {
@@ -131,7 +131,9 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
         // Internal stress variable
         fix_bond_history->update_atom_value(i, m, l+2, 0);
-        bondstore[n][l+2] = 0;
+        //bondstore[n][l+2] = 0;
+
+        //printf("ro: %f, rn: %f, Hn: %f\n", bondstore[n][0], bondstore[n][1], bondstore[n][l+2]);
         }  
       }
     }
@@ -157,7 +159,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
         // Internal stress variable
         fix_bond_history->update_atom_value(j, m, l+2, 0);
-        bondstore[n][l+2] = 0;
+        //bondstore[n][l+2] = 0;
         }
       }
     }
@@ -315,7 +317,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       continue;
     }
     
-    
     // rate-independent part of bond force
     rinv = 1.0 / r;
     if (normalize_flag) {
@@ -329,16 +330,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       }
     } else
       fbond = k0[type] * (r0 - r);
-    
-
-    // rate-independent part of bond force
-    /*
-    rinv = 1.0 / r;
-    if (normalize_flag)
-      fbond = -k0[type] * e;
-    else
-      fbond = k0[type] * (r0 - r);
-    */
 
     // rate-dependent part of bond force
     // Loop through Maxwell elements
