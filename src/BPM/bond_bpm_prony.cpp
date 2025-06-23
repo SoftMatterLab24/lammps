@@ -35,29 +35,30 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), alpha(nullptr),
+    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), alpha(nullptr), eplastic(nullptr),
     id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
   normalize_flag = 0;
   nonlinear_flag = 0;
+  plastic_flag = 0;
   writedata = 0;
 
   ntables = 0;
   tables = nullptr;
 
-  nhistory = 2;
+  nhistory = 3;
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
-  single_extra = 1;
-  svector = new double[1];
+  single_extra = 2;
+  svector = new double[2];
 
   nmax = 0;
 
-  comm_forward = 0;
-  comm_reverse = 0;
+  comm_forward = 1;
+  comm_reverse = 1;
 
   dt_temp = 0;
 }
@@ -82,6 +83,7 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(ecrit);
     memory->destroy(gamma);
     memory->destroy(alpha);
+    memory->destroy(eplastic);
     
   }
 
@@ -114,8 +116,10 @@ double BondBPMProny::store_bond(int n, int i, int j)
   if (i < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[i]; m++) {
       if (atom->bond_atom[i][m] == tag[j]) { 
-        fix_bond_history->update_atom_value(i, m, 0, r); 
-        fix_bond_history->update_atom_value(i, m, 1, r); 
+        fix_bond_history->update_atom_value(i, m, 0, r); // r0
+        fix_bond_history->update_atom_value(i, m, 1, r); // rn
+        fix_bond_history->update_atom_value(i, m, 2, 0); // ep
+      
         
         type = bond_type[i][m];
         const Table *tb = &tables[tabindex[type]];
@@ -130,7 +134,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
         dt_temp = dt;
 
         // Internal stress variable
-        fix_bond_history->update_atom_value(i, m, l+2, 0);
+        fix_bond_history->update_atom_value(i, m, l+3, 0);
         //bondstore[n][l+2] = 0;
 
         //printf("ro: %f, rn: %f, Hn: %f\n", bondstore[n][0], bondstore[n][1], bondstore[n][l+2]);
@@ -142,9 +146,10 @@ double BondBPMProny::store_bond(int n, int i, int j)
   if (j < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[j]; m++) {
       if (atom->bond_atom[j][m] == tag[i]) { 
-        fix_bond_history->update_atom_value(j, m, 0, r); 
-        fix_bond_history->update_atom_value(j, m, 1, r); 
-        
+        fix_bond_history->update_atom_value(j, m, 0, r); //r0
+        fix_bond_history->update_atom_value(j, m, 1, r); //rn
+        fix_bond_history->update_atom_value(j, m, 2, 0); //ep
+
         type = bond_type[i][m];
         const Table *tb = &tables[tabindex[type]];
         for (int l = 0; l < tb->ninput; l++ ) {
@@ -158,7 +163,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
         dt_temp = dt;
 
         // Internal stress variable
-        fix_bond_history->update_atom_value(j, m, l+2, 0);
+        fix_bond_history->update_atom_value(j, m, l+3, 0);
         //bondstore[n][l+2] = 0;
         }
       }
@@ -204,9 +209,11 @@ void BondBPMProny::store_data()
 
       fix_bond_history->update_atom_value(i, m, 0, r);
       fix_bond_history->update_atom_value(i, m, 1, r);
+      fix_bond_history->update_atom_value(i, m, 2, 0);
 
       bondstore[m][0] = r;
       bondstore[m][1] = r;
+      bondstore[m][2] = 0;
 
       const Table *tb = &tables[tabindex[type]];
     
@@ -223,8 +230,8 @@ void BondBPMProny::store_data()
         dt_temp = dt;
 
         // Internal stress variable
-        fix_bond_history->update_atom_value(i, m, n+2, 0);
-        bondstore[m][n+2] = 0;
+        fix_bond_history->update_atom_value(i, m, n+3, 0);
+        bondstore[m][n+3] = 0;
 
       }
 
@@ -249,7 +256,7 @@ void BondBPMProny::compute(int eflag, int vflag)
 
   int i1, i2, itmp, n, m, type;
   double delx, dely, delz, delvx, delvy, delvz;
-  double e, rsq, r, r0, rn , rtemp, rinv,  smooth, fbond, dot;
+  double e, ep, rsq, r, r0, rn , r0p, rinv,  smooth, fbond, dot;
   double k_temp, eta_temp, exp_j, gamma_j, tau_j, Hn, term1, term2, term3;
 
   ev_init(eflag, vflag);
@@ -278,6 +285,7 @@ void BondBPMProny::compute(int eflag, int vflag)
     type = bondlist[n][2];
     r0 = bondstore[n][0];
     rn = bondstore[n][1];
+    ep = bondstore[n][2];
 
     //printf("C bondlength %f %f\n",r0,rn);
 
@@ -310,27 +318,46 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     // update bond length in bondstore
     bondstore[n][1] = r;
-
+    
+    //bond break criterion
     if ((fabs(e) > ecrit[type]) && break_flag) {
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
     }
-    
+
+    //plastic calculations
+    if (plastic_flag) {
+      if (e > (ep + eplastic[type])) {
+        ep = e - eplastic[type];
+        bondstore[n][2] = ep;
+      }
+
+      if (e < (ep - eplastic[type])) {
+        ep = e + eplastic[type];
+        bondstore[n][2] = ep;
+      }
+
+      r0p = (1.0 + ep) * r0;
+      bondstore[n][2] = ep;
+    } else
+      r0p = r0;
+
     // rate-independent part of bond force
     rinv = 1.0 / r;
     if (normalize_flag) {
-      fbond = -k0[type] * e;
+      fbond = -k0[type] * (e - ep);
     } else if (nonlinear_flag) {
-      double dr = (r0 - r);
+      double dr = (r0p - r);
       if (dr < 0) {
         fbond = -k0[type] * pow(-dr,alpha[type]);
       } else {
         fbond = k0[type] * pow(dr,alpha[type]);
       }
     } else
-      fbond = k0[type] * (r0 - r);
+      fbond = k0[type] * (r0p - r);
 
+    //printf("r0: %f | r: %f | rp: %f\n",r0,r,r0p);
     // rate-dependent part of bond force
     // Loop through Maxwell elements
     //printf("num elements %i\n",tb->ninput); tb->ninput
@@ -349,7 +376,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       tau_j = eta_temp / k_temp;
 
       // Get bond history variable
-      Hn = bondstore[n][m+2];
+      Hn = bondstore[n][m+3];
   
       term1 = exp_j * Hn;
       term2 = k_temp * (rn - r) * (1 - exp_j) / (dt / tau_j);
@@ -358,11 +385,11 @@ void BondBPMProny::compute(int eflag, int vflag)
       
       // Update bond history variable
       Hn = term1 + term2;
-      bondstore[n][m+2] = Hn;
+      bondstore[n][m+3] = Hn;
 
     }
 
-    //printf("bondforce %f\n",fbond);
+    //printf("%f\n",-fbond);
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -409,7 +436,7 @@ void BondBPMProny::allocate()
   memory->create(ecrit, np1, "bond:ecrit");
   memory->create(gamma, np1, "bond:gamma");
   memory->create(alpha,np1,"bond:alpha");
-
+  memory->create(eplastic,np1,"bond:eplastic");
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
   for (int i = 1; i < np1; i++) setflag[i] = 0;
@@ -440,6 +467,7 @@ void BondBPMProny::coeff(int narg, char **arg)
 
   // Set defaults
   double Alph = 1;
+  double Ep = 100;
 
   //parse remaining args
   int iarg = 6;
@@ -448,6 +476,11 @@ void BondBPMProny::coeff(int narg, char **arg)
       if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
       Alph = utils::numeric(FLERR, arg[iarg+1], false, lmp);
       nonlinear_flag = 1;
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"plastic") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
+      Ep = utils::numeric(FLERR, arg[iarg+1], false, lmp); 
+      plastic_flag = 1;
       iarg += 2;
     } else error->all(FLERR,"Incorrect args for bond coefficients");
   }
@@ -458,6 +491,7 @@ void BondBPMProny::coeff(int narg, char **arg)
     ecrit[i] = ecrit_one;
     gamma[i] = gamma_one;
     alpha[i] = Alph;
+    eplastic[i] = Ep;
     setflag[i] = 1;
     
     count++;
@@ -486,7 +520,7 @@ void BondBPMProny::init_style()
 
 void BondBPMProny::settings(int narg, char **arg)
 {
-  nhistory = utils::numeric(FLERR, arg[0], false, lmp) + 2;
+  nhistory = utils::numeric(FLERR, arg[0], false, lmp) + 3;
   
   BondBPM::settings(narg, arg);
 
@@ -527,6 +561,7 @@ void BondBPMProny::write_restart(FILE *fp)
   fwrite(&ecrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&alpha[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&eplastic[1], sizeof(double), atom->nbondtypes, fp);
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
@@ -547,6 +582,7 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &ecrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &alpha[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &eplastic[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -556,6 +592,7 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&ecrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&alpha[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&eplastic[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
@@ -572,6 +609,7 @@ void BondBPMProny::write_restart_settings(FILE *fp)
   fwrite(&smooth_flag, sizeof(int), 1, fp);
   fwrite(&normalize_flag, sizeof(int), 1, fp);
   fwrite(&nonlinear_flag, sizeof(int), 1, fp);
+  fwrite(&plastic_flag,sizeof(int), 1, fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -584,10 +622,12 @@ void BondBPMProny::read_restart_settings(FILE *fp)
     utils::sfread(FLERR, &smooth_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &normalize_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &nonlinear_flag, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &plastic_flag, sizeof(int), 1, fp, nullptr, error);
   }
   MPI_Bcast(&smooth_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&normalize_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&nonlinear_flag, 1, MPI_INT, 0, world);
+  MPI_Bcast(&plastic_flag, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -603,7 +643,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double r = sqrt(rsq);
   double rinv = 1.0 / r;
 
-  double r0, rn;
+  double r0, rn, r0p, ep;
   double k_temp, eta_temp, exp_j, gamma_j, tau_j, Hn, term1, term2;
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
@@ -614,6 +654,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
       r0 = fix_bond_history->get_atom_value(i, n, 0);
       rn = fix_bond_history->get_atom_value(i, n, 1);
+      ep = fix_bond_history->get_atom_value(i, n, 2);
+      //ep =  bondstore[n][2];
 
       //if (n==0) printf("bondlength %f %f\n",r0,rn);
       //printf("S bondlength %f %f\n",r0,rn);
@@ -630,8 +672,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
         tau_j = eta_temp / k_temp;
 
         //
-        Hn = bondstore[n][m+2];
-        Hn = fix_bond_history->get_atom_value(i, n, m+2);
+        //Hn = bondstore[n][m+3];
+        Hn = fix_bond_history->get_atom_value(i, n, m+3);
 
         term1 = exp_j * Hn;
         term2 = gamma_j * k0[type] * (rn - r) * (1 - exp_j) / (dt / tau_j);
@@ -644,28 +686,29 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     }
   }
 
-  //rate-independent
   double e = (r - r0) / r0;
-  /*
-  if (normalize_flag)
-    fforce += -k0[type] * e;
-  else
-    fforce += k0[type] * (r0 - r);
-  */
+
+  //plastic calculations
+  if (plastic_flag) {
+    r0p = (1.0 + ep) * r0;
+  } else
+    r0p = r0;
+
+  //printf("e: %f | ep: %f | r0: %f | r0p: %f |\n",e,ep,r0,r0p);
 
   //printf("single force %f\n",fforce);
-
+  //rate-independent
   if (normalize_flag) {
-    fforce += -k0[type] * e;
+    fforce += -k0[type] * (e - ep);
   } else if (nonlinear_flag) {
-    double dr = (r0 - r);
+    double dr = (r0p - r);
     if (dr < 0) {
       fforce += -k0[type] * pow(-dr,alpha[type]);
     } else {
       fforce += k0[type] * pow(dr,alpha[type]);
     }
   } else
-    fforce += k0[type] * (r0 - r);
+    fforce += k0[type] * (r0p - r);
 
   //printf("single force %f\n",fforce);
   double **x = atom->x;
@@ -692,6 +735,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   // set single_extra quantities
 
   svector[0] = r0;
+  svector[1] = (1.0 + ep) * r0;
 
   return 0.0;
 }
@@ -802,7 +846,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
   if (tb->ninput == 0) error->one(FLERR, "Bond table parameters did not set N");
 
-  if (!(tb->ninput == nhistory - 2)) error->one(FLERR, "Mismatched args for bond table parameter N");
+  if (!(tb->ninput == nhistory - 3)) error->one(FLERR, "Mismatched args for bond table parameter N");
   //printf("N entries %i\n",tb->ninput);
 }
 
