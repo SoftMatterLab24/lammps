@@ -259,7 +259,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   int i1, i2, itmp, n, m, type;
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, r0, rn , r0p, rinv,  smooth, fbond, dot;
-  double k_temp, eta_temp, exp_j, tau_j, Hn, term1, term2, term3;
+  double k_temp, eta_temp, exp_j, Hn, term1, term2, term3;
 
   ev_init(eflag, vflag);
 
@@ -368,8 +368,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       k_temp = tb->kfile[m];
       eta_temp = tb->etafile[m];
       exp_j = tb->expfile[m];
-
-      tau_j = eta_temp / k_temp;
 
       // Get bond history variable
       Hn = bondstore[n][m+3];
@@ -640,7 +638,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double rinv = 1.0 / r;
 
   double r0, rn, r0p, ep;
-  double k_temp, eta_temp, exp_j, tau_j, Hn, term1, term2;
+  double k_temp, eta_temp, exp_j, Hn, term1, term2;
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
@@ -656,8 +654,6 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
         k_temp = tb->kfile[m];
         eta_temp = tb->etafile[m];
         exp_j = tb->expfile[m];
-
-        tau_j = eta_temp / k_temp;
 
         Hn = fix_bond_history->get_atom_value(i, n, m+3);
 
