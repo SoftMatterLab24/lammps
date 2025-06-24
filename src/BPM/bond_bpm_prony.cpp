@@ -211,12 +211,6 @@ void BondBPMProny::store_data()
       bondstore[m][1] = r;
       bondstore[m][2] = 0;
 
-      //for (int x1 = 0; x1 < 2; x1++){
-      //  const Table *tb = &tables[tabindex[type]];
-      //  printf("Number of entries %i\n",tb->ninput);
-      //}
-
-
       const Table *tb = &tables[tabindex[type]];
     
       // Loop through all Maxwell elements and initialize variable 
@@ -316,8 +310,6 @@ void BondBPMProny::compute(int eflag, int vflag)
     rsq = delx * delx + dely * dely + delz * delz;
     r = sqrt(rsq);    
     e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
-
-    //e = (r - r0) / r0;
 
     // update bond length in bondstore
     bondstore[n][1] = r;
