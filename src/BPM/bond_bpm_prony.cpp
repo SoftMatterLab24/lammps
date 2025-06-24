@@ -211,15 +211,21 @@ void BondBPMProny::store_data()
       bondstore[m][1] = r;
       bondstore[m][2] = 0;
 
+      //for (int x1 = 0; x1 < 2; x1++){
+      //  const Table *tb = &tables[tabindex[type]];
+      //  printf("Number of entries %i\n",tb->ninput);
+      //}
+
+
       const Table *tb = &tables[tabindex[type]];
     
-      // Loop through all Maxwell elements and initialize variable
+      // Loop through all Maxwell elements and initialize variable 
       for (int n = 0; n < tb->ninput; n++ ) {
 
+        //printf("values %f\n",tb->kfile[n]);
         // Compute exponential terms
         k_temp = tb->kfile[n];
         eta_temp = tb->etafile[n];
-
         
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[n] = exp_j;
@@ -481,11 +487,13 @@ void BondBPMProny::coeff(int narg, char **arg)
     alpha[i] = Alph;
     eplastic[i] = Ep;
     setflag[i] = 1;
+    tabindex[i] = ntables;
     
     count++;
 
     if (1.0 + ecrit[i] > max_stretch) max_stretch = 1.0 + ecrit[i];
   }
+   ntables++;
 
   if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients");
 
@@ -786,6 +794,7 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
     }
 
   }
+  //printf("k: %f | eta %f |\n",tb->kfile[0],tb->etafile[0]);
   printf("Read %i parameters from bond table\n",tb->ninput);
 }
 
@@ -818,7 +827,8 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 
   if (tb->ninput == 0) error->one(FLERR, "Bond table parameters did not set N");
 
-  if (!(tb->ninput == nhistory - 3)) error->one(FLERR, "Mismatched args for bond table parameter N");
+  //if (!(tb->ninput == nhistory - 3)) error->one(FLERR, "Mismatched args for bond table parameter N");
+  if (tb->ninput > nhistory - 3) error->one(FLERR, "New element exceeded elements per bond in table file");
   
 }
 
