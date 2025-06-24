@@ -697,7 +697,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   fforce *= rinv;
 
   if (smooth_flag) {
-    double smooth = (r - r0) / (r0 * ecrit[type]);
+    double smooth = (r0 != 0.0) ? (r - r0) / (r0 * ecrit[type]) : 0.0;
     smooth *= smooth;
     smooth *= smooth;
     smooth *= smooth;
