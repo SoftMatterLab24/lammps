@@ -308,8 +308,10 @@ void BondBPMProny::compute(int eflag, int vflag)
     delz = x[i1][2] - x[i2][2];
 
     rsq = delx * delx + dely * dely + delz * delz;
-    r = sqrt(rsq);
-    e = (r - r0) / r0;
+    r = sqrt(rsq);    
+    e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
+
+    //e = (r - r0) / r0;
 
     // update bond length in bondstore
     bondstore[n][1] = r;
@@ -661,7 +663,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     }
   }
 
-  double e = (r - r0) / r0;
+  double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
   //plastic calculations
   if (plastic_flag) {
