@@ -363,9 +363,13 @@ void BondBPMProny::compute(int eflag, int vflag)
 
       // Get bond history variable
       Hn = bondstore[n][m+3];
-  
-      term1 = exp_j * Hn;
-      term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
+
+      if (normalize_flag) {
+        term1 = exp_j * Hn;
+        term2 =  k_temp * ((rn - r) / r0) * (1 - exp_j) / (dt * k_temp / eta_temp);
+      } else
+        term1 = exp_j * Hn;
+        term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
 
       fbond += (term1 + term2);
       
@@ -433,7 +437,7 @@ void BondBPMProny::allocate()
 
 void BondBPMProny::coeff(int narg, char **arg)
 {
-  //if (narg != 6) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (narg != 8) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -449,33 +453,32 @@ void BondBPMProny::coeff(int narg, char **arg)
   if (comm->me == 0) read_table(tb, arg[4], arg[5]);
   bcast_table(tb);
 
-  // Set defaults
-  double Alph = 1;
-  double Ep = 100;
+  double alpha_one = utils::numeric(FLERR, arg[6], false, lmp);
+  double eplastic_one = utils::numeric(FLERR, arg[7], false, lmp);
 
   //parse remaining args
-  int iarg = 6;
-  while (iarg < narg) {
-    if (strcmp(arg[iarg],"nonlinear") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
-      Alph = utils::numeric(FLERR, arg[iarg+1], false, lmp);
-      nonlinear_flag = 1;
-      iarg += 2;
-    } else if (strcmp(arg[iarg],"plastic") == 0) {
-      if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
-      Ep = utils::numeric(FLERR, arg[iarg+1], false, lmp); 
-      plastic_flag = 1;
-      iarg += 2;
-    } else error->all(FLERR,"Incorrect args for bond coefficients");
-  }
+  //int iarg = 6;
+  //while (iarg < narg) {
+  //  if (strcmp(arg[iarg],"nonlinear") == 0) {
+  //    if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
+  //    Alph = utils::numeric(FLERR, arg[iarg+1], false, lmp);
+  //    nonlinear_flag = 1;
+  //    iarg += 2;
+  //  } else if (strcmp(arg[iarg],"plastic") == 0) {
+  //    if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
+  //    Ep = utils::numeric(FLERR, arg[iarg+1], false, lmp); 
+  //    plastic_flag = 1;
+  //    iarg += 2;
+  //  } else error->all(FLERR,"Incorrect args for bond coefficients");
+  // }
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     k0[i] = k_zero;
     ecrit[i] = ecrit_one;
     gamma[i] = gamma_one;
-    alpha[i] = Alph;
-    eplastic[i] = Ep;
+    alpha[i] = alpha_one;
+    eplastic[i] = eplastic_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
     
@@ -520,6 +523,14 @@ void BondBPMProny::settings(int narg, char **arg)
     } else if (strcmp(arg[iarg], "normalize") == 0) {
       if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for normalize");
       normalize_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
+      i += 1;
+    }  else if (strcmp(arg[iarg], "plastic") == 0) {
+      if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for plastic");
+      plastic_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
+      i += 1;
+    } else if (strcmp(arg[iarg], "nonlinear") == 0) {
+      if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for nonlinear");
+      nonlinear_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
       i += 1;
     } else {
       error->all(FLERR, "Illegal bond bpm command, invalid argument {}", arg[iarg]);
@@ -650,8 +661,12 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
         Hn = fix_bond_history->get_atom_value(i, n, m+3);
 
-        term1 = exp_j * Hn;
-        term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
+        if (normalize_flag) { 
+          term1 = exp_j * Hn;
+          term2 =  k_temp * ((rn - r) / r0) * (1 - exp_j) / (dt * k_temp / eta_temp);
+        } else
+          term1 = exp_j * Hn;
+          term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
 
         fforce += (term1 + term2);
 
