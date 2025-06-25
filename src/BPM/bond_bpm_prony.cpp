@@ -630,7 +630,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double rinv = 1.0 / r;
 
   double r0, rn, r0p, ep;
-  double k_temp, eta_temp, exp_j, Hn, term1, term2 fint;
+  double k_temp, eta_temp, exp_j, Hn, term1, term2, fint;
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
