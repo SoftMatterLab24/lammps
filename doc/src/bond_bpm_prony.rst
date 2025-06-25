@@ -98,7 +98,7 @@ The viscoelastic bond force has a magnitude of
    H_D = \sum_{j=1}^n h_j^t
 
 where the total viscoelastic bond force is the sum of :math:`j = 1` to :math:`n` 
-Maxwell elements as defined in the *file.table*. The force contributed by each :math:`j`-th Maxwell element
+Maxwell elements. The force contributed by each :math:`j`-th Maxwell element
 at the current timestep is given as
 
 .. math::
@@ -107,7 +107,8 @@ at the current timestep is given as
 
 where :math:`k_j` is a stiffness, :math:`\eta_j` is a viscosity, :math:`\Delta t` is the timestep,
 :math:`r^{t-1}` is the previous bond length, :math:`r` is the current bond length, and :math:`h_j^{t-1}`
-is the force contributed on the previous timestep. Note that as defined in the formula
+is the force contributed on the previous timestep. The stiffness and viscosity coefficients for the
+Maxwell elements are stored in a tabulated file. Note that as defined in the formula
 the viscosity :math:`\eta_j` really has units of (force*time units). It would need to be divided 
 by a per-bond area to have units of (pressure * time), but a bonds area is not well defined or
 easy to compute.
@@ -236,10 +237,10 @@ The format of a tabulated file is as follows (without parenthesized comments):
 
 .. code-block:: LAMMPS
 
-   # Coefficients for Mawell elements   (one or more comment or blank lines)
+   # Coefficients for Maxwell elements  (one or more comment or blank lines)
    
    MAXWELL                              (keyword is the first text on line)
-   n 5                                  (n parameters)
+   n 5                                  (n Maxwell elements/entries)
                                         (blank line)
    1 1.0 0.1                            (index, stiffness, viscosity)
    2 2.0 100
@@ -249,7 +250,7 @@ The format of a tabulated file is as follows (without parenthesized comments):
 The number of parameters *n* defined in the table file must be less than or 
 equal to the number of entries *N* allocated via the :doc:`bond_style <bond_style>` command.
 Therefore, if each bond type uses a unique tabulated file, *N* 
-should be allocated according to the file with largest number of tabulated entries.
+should be allocated according to the file with the largest number of tabulated entries.
 
 ----------
 
