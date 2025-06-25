@@ -9,7 +9,7 @@ Syntax
 .. code-block:: LAMMPS
 
    bond_style bpm/prony N keyword value attribute1 attribute2 ...
-* N = allocate N history variables for each Mawell element
+* N = allocate history variables for N Mawell elements
 * optional keyword =  *store/local* or *overlay/pair* or *smooth* or *normalize* or *break* or *plastic* or *nonlinear*
 
   .. parsed-literal::
@@ -49,10 +49,11 @@ Examples
 .. code-block:: LAMMPS
 
    bond_style bpm/prony 1
-   bond_coeff 1 1.0 0.4 0.1 file.table keyword
+   bond_coeff 1 1.0 0.4 0.1 file.table keyword 1.0 1.0
 
    bond_style bpm/prony 1 plastic yes nonlinear yes
-   bond_coeff 1 1.0 0.4 0.1 file.table keyword 0.2 2.0
+   bond_coeff 1 1.0 0.4 0.1 file1.table keyword 1.0 1.0
+   bond_coeff 2 5.0 0.6 0.1 file2.table keyword 0.2 2.0
 
    bond_style bpm/prony 1 myfix 1000 time id1 id2
    dump 1 all local 1000 dump.broken f_myfix[1] f_myfix[2] f_myfix[3]
@@ -72,7 +73,7 @@ the system will not reset the reference and previous states of a bond.
 This bond style only applies central-body forces which conserve the
 translational and rotational degrees of freedom of a bonded set of
 particles. The bond force follows a linear viscoelastic formulation based 
-on a generalized Maxwell element, as outlined in :ref:`(Groot) <Groot4>`:. 
+on a generalized Maxwell element, as outlined in :ref:`(Kaliske) <Kaliske1>`:. 
 The bond force is comprised of
 
 .. math::
@@ -97,7 +98,7 @@ The viscoelastic bond force has a magnitude of
    H_D = \sum_{j=1}^n h_j^t
 
 where the total viscoelastic bond force is the sum of :math:`j = 1` to :math:`n` 
-maxwell elements as defined in the *file.table*. The force contributed by each :math:`j`-th element
+Maxwell elements as defined in the *file.table*. The force contributed by each :math:`j`-th Maxwell element
 at the current timestep is given as
 
 .. math::
@@ -106,7 +107,10 @@ at the current timestep is given as
 
 where :math:`k_j` is a stiffness, :math:`\eta_j` is a viscosity, :math:`\Delta t` is the timestep,
 :math:`r^{t-1}` is the previous bond length, :math:`r` is the current bond length, and :math:`h_j^{t-1}`
-is the force contributed on the previous timestep.
+is the force contributed on the previous timestep. Note that as defined in the formula
+the viscosity :math:`\eta_j` really has units of (force*time units). It would need to be divided 
+by a per-bond area to have units of (pressure * time), but a bonds area is not well defined or
+easy to compute.
 
 Bonds will break at a strain of :math:`\epsilon_c`.  This is done by setting
 the bond type to 0 such that forces are no longer computed.
@@ -133,8 +137,8 @@ approach the critical strain
 
    w = 1.0 - \left( \frac{r - r_0}{r_0 \epsilon_c} \right)^8 .
 
-If the *normalize* keyword is set to *yes*, the elastic bond force will be
-normalized by :math:`r_0` such that :math:`k` must be given in force units.
+If the *normalize* keyword is set to *yes*, the bond force will be
+normalized by :math:`r_0` such that :math:`k0` and :math:`k_j` must all be given in force units.
 
 By default, pair forces are not calculated between bonded particles.
 Pair forces can alternatively be overlaid on top of bond forces by setting
@@ -162,7 +166,9 @@ where :math:`r_{eq}` is the equlibrium bond length.
 If the bond stretches beyond a strain of :math:`\epsilon_p` in compression or extension, 
 it will plastically activate and :math:`r_{eq}` will evolve to ensure :math:`|(r-r_{eq})/r_{eq}|`
 never exceeds :math:`r_{eq}`. Therefore, if a bond is continually loaded in either tension or compression, 
-the force in the elastic element will initially grow elastically before plateauing.
+the force in the elastic element will initially grow elastically before plateauing. Similar behaviour to 
+*plastic no* can be achieved by setting an arbitrarily high value of :math:`\epsilon_p`, or a higher value
+than :math:`\epsilon_c` if the *break yes* option is enabled.
 
 The *nonlinear* keyword toggles whether the force in the elastic element is nonlinear. 
 If set to *yes* the elastic force has a magnitude of
@@ -171,7 +177,10 @@ If set to *yes* the elastic force has a magnitude of
    F_{E} = k0 (r - r_0)^{\alpha}
 
 where :math:`\alpha` is an exponent chosen to model an arbitrary nonlinear response.
-Note that the units of :math:`k_0` will depend on :math:`\alpha` in order for consistent force units.
+Note that the units of :math:`k_0` will depend on :math:`\alpha` in order for the
+force units to be consistent. Similar behaviour to *nonlinear no* can be achived by setting
+:math:`\alpha` equal to unity. If additionally, *plastic* = *yes* the reference state :math:`r0`
+is replaced by the equlibrium state :math:`r{eq}` as outlined above.
 
 The following coefficients must be defined for each bond type via the
 :doc:`bond_coeff <bond_coeff>` command as in the example above, or in
@@ -179,18 +188,15 @@ the data file or restart files read by the :doc:`read_data
 <read_data>` or :doc:`read_restart <read_restart>` commands:
 
 * :math:`k0`             (force/distance units)
-* :math:`\epsilon_c`    (unitless)
-* :math:`\gamma`        (force/velocity units)
+* :math:`\epsilon_c`     (unitless)
+* :math:`\gamma`         (force/velocity units)
 * filename
 * keyword
+* :math:`\epsilon_p`      (unitless)
+* :math:`\alpha`          (unitless)
 
 The filename specifies a file containing the tablulated coefficients for the Maxwell 
 elements. The keyword specifies a section of the file. The format of this file is described below.
-Additionally, if either *plastic* or *nonlinear* are set to *yes*, a sixth or seventh coefficient
-must be provided:
-
-* :math:`\epsilon_p`       (unitless)
-* :math:`\alpha`           (unitless)
 
 If the *store/local* keyword is used, an internal fix will track bonds that
 break during the simulation. Whenever a bond breaks, data is processed
@@ -224,6 +230,8 @@ query the status of broken bonds or permanently delete them, e.g.:
 
 ----------
 
+Formatting the table file
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 The format of a tabulated file is as follows (without parenthesized comments):
 
 .. code-block:: LAMMPS
@@ -241,11 +249,9 @@ The format of a tabulated file is as follows (without parenthesized comments):
 The number of parameters *n* defined in the table file must be less than or 
 equal to the number of entries *N* allocated via the :doc:`bond_style <bond_style>` command.
 Therefore, if each bond type uses a unique tabulated file, *N* 
-should be allocated according to the largest number of tabulated entries.
+should be allocated according to the file with largest number of tabulated entries.
 
 ----------
-
-.. versionadded:: 25June2025
 
 Restart and other info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -308,7 +314,7 @@ keyword is set to *yes*, this bond style alternatively requires setting
 Related commands
 """"""""""""""""
 
-:doc:`bond_coeff <bond_coeff>`, :doc:`pair bpm/spring <pair_bpm_spring>`
+:doc:`bond_coeff <bond_coeff>`, :doc:`bond bpm/spring <bond_bpm_spring>`, :doc:`bond bpm/spring/plastic <bond_bpm_spring_plastic>`
 
 Default
 """""""
@@ -316,6 +322,10 @@ Default
 The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, *plastic* = *no*, and *nonlinear* = *no*
 
 ----------
+
+.. _Kaliske1:
+
+**(Kaliske)** Kaliske and Rothert, Comput. Mech., 19, 228-239 (1997).
 
 .. _fragment-Clemmer:
 
