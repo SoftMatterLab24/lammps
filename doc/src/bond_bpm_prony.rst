@@ -10,7 +10,7 @@ Syntax
 
    bond_style bpm/prony N keyword value attribute1 attribute2 ...
 * N = allocate N history variables for each Mawell element
-* optional keyword = *overlay/pair* or *store/local* or *smooth* or *normalize* or *break* or *volume/factor*
+* optional keyword =  *store/local* or *overlay/pair* or *smooth* or *normalize* or *break* or *plastic* or *nonlinear*
 
   .. parsed-literal::
 
@@ -54,14 +54,12 @@ Examples
    bond_style bpm/prony 1 plastic yes nonlinear yes
    bond_coeff 1 1.0 0.4 0.1 file.table keyword 0.2 2.0
 
-   bond_style bpm/spring myfix 1000 time id1 id2
+   bond_style bpm/prony 1 myfix 1000 time id1 id2
    dump 1 all local 1000 dump.broken f_myfix[1] f_myfix[2] f_myfix[3]
    dump_modify 1 write_header no
 
 Description
 """""""""""
-
-.. versionadded:: 25June2025
 
 The *bpm/prony* bond style computes forces based on
 deviations from the initial reference state of the two atoms and the strain history. The
@@ -83,7 +81,7 @@ The bond force is comprised of
 
 where :math:`F_{E}` is the force contribution from the rate-independent
 elastic element, and :math:`H_{D}` is the contribution from the rate-dependent 
-viscoelastic elements, and :math:`w` is an optional smoothing factor discussed below.
+viscoelastic (Maxwell) elements, and :math:`w` is an optional smoothing factor discussed below.
 The elastic bond force has a magnitude of
 
 .. math::
@@ -170,7 +168,7 @@ The *nonlinear* keyword toggles whether the force in the elastic element is nonl
 If set to *yes* the elastic force has a magnitude of
 
 .. math::
-   F_{E} = k0 (r - r_{eq})^{\alpha}
+   F_{E} = k0 (r - r_0)^{\alpha}
 
 where :math:`\alpha` is an exponent chosen to model an arbitrary nonlinear response.
 Note that the units of :math:`k_0` will depend on :math:`\alpha` in order for consistent force units.
@@ -247,6 +245,8 @@ should be allocated according to the largest number of tabulated entries.
 
 ----------
 
+.. versionadded:: 25June2025
+
 Restart and other info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -272,12 +272,17 @@ the specified attribute.
 Any settings with the *store/local* option are not saved to a restart
 file and must be redefined.
 
-The potential energy and the single() function of this bond style return
-:math:`k (r - r_0)^2 / 2` as a proxy of the energy of a bonded interaction,
-ignoring any volumetric/smoothing factors or dissipative forces.  The single()
-function also calculates an extra bond quantity, the initial distance
-:math:`r_0`. This extra quantity can be accessed by the
-:doc:`compute bond/local <compute_bond_local>` command as *b1*\ .
+The single() function of this bond style returns 0.0 for the energy of a 
+bonded interaction, since energy is not conserved in these dissipative potentials. 
+However, the single() function also calculates 4 additional quantities. The first 2 pertain 
+to bond lengths, including the reference state :math:`r_0` and equlibrium state :math:`r_{eq}`
+if the *plastic* option is utilized. If *plastic* = *no* then the equlibrium state 
+:math:`r_{eq}` will equal the reference state :math:`r_0`.
+The next 2 quantites (3-4) are the split elastic :math:`F_E`
+and viscoelastic :math:`H_D` forces respectively.
+
+These extra quantity can be accessed by the
+:doc:`compute bond/local <compute_bond_local>` command as *b1*, *b2*, ..., *b4* \.
 
 Restrictions
 """"""""""""
@@ -308,7 +313,7 @@ Related commands
 Default
 """""""
 
-The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, and *volume/factor* = *no*
+The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, *plastic* = *no*, and *nonlinear* = *no*
 
 ----------
 
