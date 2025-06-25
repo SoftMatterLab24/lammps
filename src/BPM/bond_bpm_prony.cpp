@@ -52,8 +52,8 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
-  single_extra = 3;
-  svector = new double[3];
+  single_extra = 4;
+  svector = new double[4];
 
   nmax = 0;
 
@@ -630,7 +630,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double rinv = 1.0 / r;
 
   double r0, rn, r0p, ep;
-  double k_temp, eta_temp, exp_j, Hn, term1, term2, fint;
+  double k_temp, eta_temp, exp_j, Hn, term1, term2;
+  double fel, fint;
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
@@ -670,16 +671,20 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   //rate-independent
   if (normalize_flag) {
-    fforce += -k0[type] * (e - ep);
+    fel = -k0[type] * (e - ep);
+    fforce += fel;
   } else if (nonlinear_flag) {
     double dr = (r0p - r);
     if (dr < 0) {
-      fforce += -k0[type] * pow(-dr,alpha[type]);
+      fel = -k0[type] * pow(-dr,alpha[type]);
+      fforce += fel;
     } else {
-      fforce += k0[type] * pow(dr,alpha[type]);
+      fel = k0[type] * pow(dr,alpha[type]);
+      fforce += fel;
     }
   } else
-    fforce += k0[type] * (r0p - r);
+    fel = k0[type] * (r0p - r);
+    fforce += fel;
 
   double **x = atom->x;
   double **v = atom->v;
@@ -706,6 +711,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   svector[0] = r0;
   svector[1] = (1.0 + ep) * r0;
+  svector[2] = fel;
   svector[3] = fint;
 
   return 0.0;
