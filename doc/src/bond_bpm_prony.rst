@@ -1,6 +1,6 @@
-.. index:: bond_style bpm/spring
+.. index:: bond_style bpm/prony
 
-bond_style bpm/spring command
+bond_style bpm/prony command
 =============================
 
 Syntax
@@ -8,9 +8,9 @@ Syntax
 
 .. code-block:: LAMMPS
 
-   bond_style bpm/spring keyword value attribute1 attribute2 ...
-
-* optional keyword = *overlay/pair* or *store/local* or *smooth* or *normalize* or *break* or *volume/factor*
+   bond_style bpm/prony N keyword value attribute1 attribute2 ...
+* N = allocate N history variables for each Mawell element
+* optional keyword =  *store/local* or *overlay/pair* or *smooth* or *normalize* or *break* or *plastic* or *nonlinear*
 
   .. parsed-literal::
 
@@ -36,49 +36,79 @@ Syntax
        *break* value = *yes* or *no*
           indicates whether bonds break during a run
 
-       *volume/factor* value = *yes* or *no*
-          indicates whether forces include the volumetric contribution
+       *plastic* value = *yes* or *no*
+          indicates whether bonds plastically deform
+
+       *nonlinear* value = *yes* or *no*
+          indicates whether nonlinear option is used
+
 
 Examples
 """"""""
 
 .. code-block:: LAMMPS
 
-   bond_style bpm/spring
-   bond_coeff 1 1.0 0.05 0.1
+   bond_style bpm/prony 1
+   bond_coeff 1 1.0 0.4 0.1 file.table keyword
 
-   bond_style bpm/spring volume/factor yes
-   bond_coeff 1 1.0 0.05 0.1 0.5
+   bond_style bpm/prony 1 plastic yes nonlinear yes
+   bond_coeff 1 1.0 0.4 0.1 file.table keyword 0.2 2.0
 
-   bond_style bpm/spring myfix 1000 time id1 id2
+   bond_style bpm/prony 1 myfix 1000 time id1 id2
    dump 1 all local 1000 dump.broken f_myfix[1] f_myfix[2] f_myfix[3]
    dump_modify 1 write_header no
 
 Description
 """""""""""
 
-.. versionadded:: 4May2022
-
-The *bpm/spring* bond style computes forces based on
-deviations from the initial reference state of the two atoms.  The
-reference state is stored by each bond when it is first computed in
-the setup of a run. Data is then preserved across run commands and is
-written to :doc:`binary restart files <restart>` such that restarting
-the system will not reset the reference state of a bond.
+The *bpm/prony* bond style computes forces based on
+deviations from the initial reference state of the two atoms and the strain history. The
+reference length :math:`r_0` is stored by each bond when it is first computed in
+the setup of a run. Initially, the previous length of the bond :math:`r^{t-1}`
+is set equal to :math:`r_0` but evolves during the run. Data is then preserved across
+run commands and is written to :doc:`binary restart files <restart>` such that restarting
+the system will not reset the reference and previous states of a bond.
 
 This bond style only applies central-body forces which conserve the
 translational and rotational degrees of freedom of a bonded set of
-particles based on a model described by Clemmer and Robbins
-:ref:`(Clemmer) <fragment-Clemmer>`. The force has a magnitude of
+particles. The bond force follows a linear viscoelastic formulation based 
+on a generalized Maxwell element, as outlined in :ref:`(Groot) <Groot4>`:. 
+The bond force is comprised of
 
 .. math::
 
-   F = k (r - r_0) w
+   F = w (F_{E} + H_D)
 
-where :math:`k` is a stiffness, :math:`r` is the current distance
-and :math:`r_0` is the initial distance between the two particles, and
-:math:`w` is an optional smoothing factor discussed below. Bonds will
-break at a strain of :math:`\epsilon_c`.  This is done by setting
+where :math:`F_{E}` is the force contribution from the rate-independent
+elastic element, and :math:`H_{D}` is the contribution from the rate-dependent 
+viscoelastic (Maxwell) elements, and :math:`w` is an optional smoothing factor discussed below.
+The elastic bond force has a magnitude of
+
+.. math::
+
+   F_E = k0 (r - r_0)
+
+where :math:`k0` is a stiffness, :math:`r` is the current distance
+and :math:`r_0` is the initial distance between the two particles.
+The viscoelastic bond force has a magnitude of
+
+.. math::
+
+   H_D = \sum_{j=1}^n h_j^t
+
+where the total viscoelastic bond force is the sum of :math:`j = 1` to :math:`n` 
+maxwell elements as defined in the *file.table*. The force contributed by each :math:`j`-th element
+at the current timestep is given as
+
+.. math::
+
+   h_j^t = \exp{\frac{-k_j \Delta}{\eta_j}} h_j^{t-1} + \frac{\eta_j}{\Delta t} (1 - \exp{\frac{-k_j \Delta}{\eta_j}} ) [r^{t-1} - r]
+
+where :math:`k_j` is a stiffness, :math:`\eta_j` is a viscosity, :math:`\Delta t` is the timestep,
+:math:`r^{t-1}` is the previous bond length, :math:`r` is the current bond length, and :math:`h_j^{t-1}`
+is the force contributed on the previous timestep.
+
+Bonds will break at a strain of :math:`\epsilon_c`.  This is done by setting
 the bond type to 0 such that forces are no longer computed.
 
 An additional damping force is applied to the bonded
@@ -113,8 +143,6 @@ the *overlay/pair* keyword to *yes*. These settings require specific
 restrictions.  Further details can be found in the :doc:`how to <Howto_bpm>`
 page on BPMs.
 
-.. versionadded:: 28Mar2023
-
 If the *break* keyword is set to *no*, LAMMPS assumes bonds should not break
 during a simulation run. This will prevent some unnecessary calculation.
 The recommended bond communication distance no longer depends on the value of
@@ -123,43 +151,46 @@ heuristic maximum strain used by typical non-bpm bond styles. Similar behavior
 to *break no* can also be attained by setting an arbitrarily high value of
 :math:`\epsilon_c`. One cannot use *break no* with *smooth yes*.
 
-.. versionadded:: 4Feb2025
-
-The *volume/factor* keyword toggles whether an additional multibody
-contribution is added to he force using the formulation in
-:ref:`(Clemmer2) <multibody-Clemmer>`,
+The *plastic* keyword toggles whether the elastic element is allowed to plastically
+deform as done by :doc:`bpm/spring/plastic <bond_bpm+spring_plastic>`. If set to *yes* the elastic
+force has a magnitude of
 
 .. math::
+   F_{E} = k0 (r - r_{eq})
 
-   \alpha_v \left(\left[\frac{V_i + V_j}{V_{0,i} + V_{0,j}}\right]^{1/3} - \frac{r_{ij}}{r_{0,ij}}\right)
+where :math:`r_{eq}` is the equlibrium bond length.
+If the bond stretches beyond a strain of :math:`\epsilon_p` in compression or extension, 
+it will plastically activate and :math:`r_{eq}` will evolve to ensure :math:`|(r-r_{eq})/r_{eq}|`
+never exceeds :math:`r_{eq}`. Therefore, if a bond is continually loaded in either tension or compression, 
+the force in the elastic element will initially grow elastically before plateauing.
 
-where :math:`\alpha_v` is a user specified coefficient and :math:`V_i`
-and :math:`V_{0,i}` are estimates of the current and local volume
-of atom :math:`i`. These volumes are calculated as the sum of current
-or initial bond lengths cubed. In 2D, the volume is replaced with an area
-calculated using bond lengths squared and the cube root in the above equation
-is accordingly replaced with a square root. This approximation assumes bonds
-are evenly distributed on a spherical surface and neglects constant prefactors
-which are irrelevant since only the ratio of volumes matters. This term may be
-used to adjust the Poisson's ratio. See the simulation in the
-``examples/bpm/poissons_ratio`` directory for a demonstration of this effect.
+The *nonlinear* keyword toggles whether the force in the elastic element is nonlinear. 
+If set to *yes* the elastic force has a magnitude of
 
-If a bond is broken (or created), :math:`V_{0,i}` is updated by subtracting
-(or adding) that bond's contribution.
+.. math::
+   F_{E} = k0 (r - r_0)^{\alpha}
+
+where :math:`\alpha` is an exponent chosen to model an arbitrary nonlinear response.
+Note that the units of :math:`k_0` will depend on :math:`\alpha` in order for consistent force units.
 
 The following coefficients must be defined for each bond type via the
 :doc:`bond_coeff <bond_coeff>` command as in the example above, or in
 the data file or restart files read by the :doc:`read_data
 <read_data>` or :doc:`read_restart <read_restart>` commands:
 
-* :math:`k`             (force/distance units)
+* :math:`k0`             (force/distance units)
 * :math:`\epsilon_c`    (unitless)
 * :math:`\gamma`        (force/velocity units)
+* filename
+* keyword
 
-Additionally, if *volume/factor* is set to *yes*, a fourth coefficient
+The filename specifies a file containing the tablulated coefficients for the Maxwell 
+elements. The keyword specifies a section of the file. The format of this file is described below.
+Additionally, if either *plastic* or *nonlinear* are set to *yes*, a sixth or seventh coefficient
 must be provided:
 
-* :math:`a_v`           (force units)
+* :math:`\epsilon_p`       (unitless)
+* :math:`\alpha`           (unitless)
 
 If the *store/local* keyword is used, an internal fix will track bonds that
 break during the simulation. Whenever a bond breaks, data is processed
@@ -193,6 +224,29 @@ query the status of broken bonds or permanently delete them, e.g.:
 
 ----------
 
+The format of a tabulated file is as follows (without parenthesized comments):
+
+.. code-block:: LAMMPS
+
+   # Coefficients for Mawell elements   (one or more comment or blank lines)
+   
+   MAXWELL                              (keyword is the first text on line)
+   n 5                                  (n parameters)
+                                        (blank line)
+   1 1.0 0.1                            (index, stiffness, viscosity)
+   2 2.0 100
+   ...
+   5 0.5 1.0
+
+The number of parameters *n* defined in the table file must be less than or 
+equal to the number of entries *N* allocated via the :doc:`bond_style <bond_style>` command.
+Therefore, if each bond type uses a unique tabulated file, *N* 
+should be allocated according to the largest number of tabulated entries.
+
+----------
+
+.. versionadded:: 25June2025
+
 Restart and other info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -218,12 +272,17 @@ the specified attribute.
 Any settings with the *store/local* option are not saved to a restart
 file and must be redefined.
 
-The potential energy and the single() function of this bond style return
-:math:`k (r - r_0)^2 / 2` as a proxy of the energy of a bonded interaction,
-ignoring any volumetric/smoothing factors or dissipative forces.  The single()
-function also calculates an extra bond quantity, the initial distance
-:math:`r_0`. This extra quantity can be accessed by the
-:doc:`compute bond/local <compute_bond_local>` command as *b1*\ .
+The single() function of this bond style returns 0.0 for the energy of a 
+bonded interaction, since energy is not conserved in these dissipative potentials. 
+However, the single() function also calculates 4 additional quantities. The first 2 pertain 
+to bond lengths, including the reference state :math:`r_0` and equlibrium state :math:`r_{eq}`
+if the *plastic* option is utilized. If *plastic* = *no* then the equlibrium state 
+:math:`r_{eq}` will equal the reference state :math:`r_0`.
+The next 2 quantites (3-4) are the split elastic :math:`F_E`
+and viscoelastic :math:`H_D` forces respectively.
+
+These extra quantity can be accessed by the
+:doc:`compute bond/local <compute_bond_local>` command as *b1*, *b2*, ..., *b4* \.
 
 Restrictions
 """"""""""""
@@ -254,7 +313,7 @@ Related commands
 Default
 """""""
 
-The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, and *volume/factor* = *no*
+The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, *plastic* = *no*, and *nonlinear* = *no*
 
 ----------
 
