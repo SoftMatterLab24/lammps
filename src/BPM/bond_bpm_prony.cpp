@@ -52,8 +52,8 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
-  single_extra = 2;
-  svector = new double[2];
+  single_extra = 3;
+  svector = new double[3];
 
   nmax = 0;
 
@@ -630,7 +630,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double rinv = 1.0 / r;
 
   double r0, rn, r0p, ep;
-  double k_temp, eta_temp, exp_j, Hn, term1, term2;
+  double k_temp, eta_temp, exp_j, Hn, term1, term2 fint;
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
@@ -659,6 +659,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     }
   }
 
+  fint = fforce;
   double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
   //plastic calculations
@@ -705,6 +706,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   svector[0] = r0;
   svector[1] = (1.0 + ep) * r0;
+  svector[3] = fint;
 
   return 0.0;
 }
