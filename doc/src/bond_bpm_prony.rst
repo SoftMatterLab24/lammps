@@ -73,7 +73,7 @@ the system will not reset the reference and previous states of a bond.
 This bond style only applies central-body forces which conserve the
 translational and rotational degrees of freedom of a bonded set of
 particles. The bond force follows a linear viscoelastic formulation based 
-on a generalized Maxwell element, as outlined in :ref:`(Kaliske) <Kaliske1>`:. 
+on a generalized Maxwell element, as outlined in :ref:`(Kaliske) <Kaliske1>`. 
 The bond force is comprised of
 
 .. math::
@@ -83,31 +83,31 @@ The bond force is comprised of
 where :math:`F_{E}` is the force contribution from the rate-independent
 elastic element, and :math:`H_{D}` is the contribution from the rate-dependent 
 viscoelastic (Maxwell) elements, and :math:`w` is an optional smoothing factor discussed below.
-The elastic bond force has a magnitude of
+The elastic force has a magnitude of
 
 .. math::
 
-   F_E = k0 (r - r_0)
+   F_E = k_0 (r - r_0)
 
-where :math:`k0` is a stiffness, :math:`r` is the current distance
+where :math:`k_0` is a stiffness, :math:`r` is the current distance
 and :math:`r_0` is the initial distance between the two particles.
-The viscoelastic bond force has a magnitude of
+The viscoelastic force has a magnitude of
 
 .. math::
 
-   H_D = \sum_{j=1}^n h_j^t
+   H_D = \sum_{j=1}^{n} h_j^t
 
-where the total viscoelastic bond force is the sum of :math:`j = 1` to :math:`n` 
+where the total viscoelastic force is the sum of :math:`j = 1` to :math:`n` 
 Maxwell elements. The force contributed by each :math:`j`-th Maxwell element
-at the current timestep is given as
+at the current timestep :math:`t` is given as
 
 .. math::
 
-   h_j^t = \exp{\frac{-k_j \Delta}{\eta_j}} h_j^{t-1} + \frac{\eta_j}{\Delta t} (1 - \exp{\frac{-k_j \Delta}{\eta_j}} ) [r^{t-1} - r]
+   h_j^t = \exp{ \left(\frac{-k_j \Delta t}{\eta_j}\right)} h_j^{t-1} + \frac{\eta_j}{\Delta t} \left[1 - \exp{\left(\frac{-k_j \Delta t}{\eta_j}\right)} \right] (r^{t-1} - r)
 
 where :math:`k_j` is a stiffness, :math:`\eta_j` is a viscosity, :math:`\Delta t` is the timestep,
 :math:`r^{t-1}` is the previous bond length, :math:`r` is the current bond length, and :math:`h_j^{t-1}`
-is the force contributed on the previous timestep. The stiffness and viscosity coefficients for the
+is the viscoelastic force from the previous timestep. The stiffness and viscosity coefficients for the
 Maxwell elements are stored in a tabulated file. Note that as defined in the formula
 the viscosity :math:`\eta_j` really has units of (force*time units). It would need to be divided 
 by a per-bond area to have units of (pressure * time), but a bonds area is not well defined or
@@ -139,7 +139,7 @@ approach the critical strain
    w = 1.0 - \left( \frac{r - r_0}{r_0 \epsilon_c} \right)^8 .
 
 If the *normalize* keyword is set to *yes*, the bond force will be
-normalized by :math:`r_0` such that :math:`k0` and :math:`k_j` must all be given in force units.
+normalized by :math:`r_0` such that :math:`k_0` and :math:`k_j` must all be given in force units.
 
 By default, pair forces are not calculated between bonded particles.
 Pair forces can alternatively be overlaid on top of bond forces by setting
@@ -161,7 +161,7 @@ deform as done by :doc:`bpm/spring/plastic <bond_bpm+spring_plastic>`. If set to
 force has a magnitude of
 
 .. math::
-   F_{E} = k0 (r - r_{eq})
+   F_{E} = k_0 (r - r_{eq})
 
 where :math:`r_{eq}` is the equlibrium bond length.
 If the bond stretches beyond a strain of :math:`\epsilon_p` in compression or extension, 
@@ -175,20 +175,20 @@ The *nonlinear* keyword toggles whether the force in the elastic element is nonl
 If set to *yes* the elastic force has a magnitude of
 
 .. math::
-   F_{E} = k0 (r - r_0)^{\alpha}
+   F_{E} = k_0 (r - r_0)^{\alpha}
 
 where :math:`\alpha` is an exponent chosen to model an arbitrary nonlinear response.
 Note that the units of :math:`k_0` will depend on :math:`\alpha` in order for the
 force units to be consistent. Similar behaviour to *nonlinear no* can be achived by setting
-:math:`\alpha` equal to unity. If additionally, *plastic* = *yes* the reference state :math:`r0`
-is replaced by the equlibrium state :math:`r{eq}` as outlined above.
+:math:`\alpha` equal to unity. If additionally, *plastic* = *yes* the reference state :math:`r_0`
+is replaced by the equlibrium state :math:`r_{eq}` as outlined above.
 
 The following coefficients must be defined for each bond type via the
 :doc:`bond_coeff <bond_coeff>` command as in the example above, or in
 the data file or restart files read by the :doc:`read_data
 <read_data>` or :doc:`read_restart <read_restart>` commands:
 
-* :math:`k0`             (force/distance units)
+* :math:`k_0`             (force/distance units)
 * :math:`\epsilon_c`     (unitless)
 * :math:`\gamma`         (force/velocity units)
 * filename
