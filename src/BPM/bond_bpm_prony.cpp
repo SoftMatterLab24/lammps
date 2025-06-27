@@ -271,11 +271,14 @@ void BondBPMProny::compute(int eflag, int vflag)
 
   for (n = 0; n < nbondlist; n++) {
     
+
+    //printf(bondlist[n][2])
     // skip bond if already broken
     if (bondlist[n][2] <= 0) {
-
-      printf("bondtype %i",bondlist[n][2]);
-      bondstore[n][0] = 0;
+      // need to check if bond has been removed
+      //delete_history(int i, int m)
+      //printf("Hey");
+      //bondstore[n][0] = 0;
       continue;
     };
 
@@ -303,6 +306,10 @@ void BondBPMProny::compute(int eflag, int vflag)
       i2 = itmp;
     }
 
+    //if (((tag[i1] == 78) && (tag[i2] == 98)) || ((tag[i1] == 98) && (tag[i2] == 78))) {
+    //  printf("r0 %f | \n",r0);
+    //}
+
     delx = x[i1][0] - x[i2][0];
     dely = x[i1][1] - x[i2][1];
     delz = x[i1][2] - x[i2][2];
@@ -323,10 +330,7 @@ void BondBPMProny::compute(int eflag, int vflag)
         bondstore[n][m+3] = 0;
       }
 
-      printf("iatom %i | jatom %i | r0 %f |\n",tag[i1],tag[i2],r0);
-      if (tag[i1]==95 && tag[i2]==97) {
-        printf("r0 %f | r %f | ep %f\n",r0,r,ep);
-      }
+      //printf("iatom %i | jatom %i | r0 %f |\n",tag[i1],tag[i2],r0);
     }
 
     // update bond length in bondstore

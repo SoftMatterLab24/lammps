@@ -34,6 +34,7 @@ class BondBPM : public Bond {
   void write_restart(FILE *) override;
   void read_restart(FILE *) override;
   double single(int, double, int, int, double &) override = 0;
+  
 
  protected:
   double r0_max_estimate;
@@ -49,7 +50,6 @@ class BondBPM : public Bond {
   class FixBondHistory *fix_bond_history;
   class FixUpdateSpecialBonds *fix_update_special_bonds;
 
-  void process_broken(int, int);
   typedef void (BondBPM::*FnPtrPack)(int, int, int);
   FnPtrPack *pack_choice;    // ptrs to pack functions
   double *output_data;
@@ -59,7 +59,7 @@ class BondBPM : public Bond {
 
   int n_histories;
   std::vector<Fix *> histories;
-
+  void process_broken(int, int);
   void pack_id1(int, int, int);
   void pack_id2(int, int, int);
   void pack_time(int, int, int);
