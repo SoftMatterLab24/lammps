@@ -118,7 +118,6 @@ double BondBPMProny::store_bond(int n, int i, int j)
         fix_bond_history->update_atom_value(i, m, 1, r); // rn
         fix_bond_history->update_atom_value(i, m, 2, 0); // ep
       
-        
         type = bond_type[i][m];
         const Table *tb = &tables[tabindex[type]];
         for (int l = 0; l < tb->ninput; l++ ) {
@@ -160,7 +159,6 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
         // Internal stress variable
         fix_bond_history->update_atom_value(j, m, l+3, 0);
-        //bondstore[n][l+2] = 0;
         }
       }
     }
@@ -274,7 +272,12 @@ void BondBPMProny::compute(int eflag, int vflag)
   for (n = 0; n < nbondlist; n++) {
     
     // skip bond if already broken
-    if (bondlist[n][2] <= 0) continue;
+    if (bondlist[n][2] <= 0) {
+
+      printf("bondtype %i",bondlist[n][2]);
+      bondstore[n][0] = 0;
+      continue;
+    };
 
     i1 = bondlist[n][0];
     i2 = bondlist[n][1];
@@ -300,9 +303,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       i2 = itmp;
     }
 
-    // If bond hasn't been set - should be initialized to zero -
-    if (r0 < EPSILON || std::isnan(r0)) r0 = store_bond(n, i1, i2);
-
     delx = x[i1][0] - x[i2][0];
     dely = x[i1][1] - x[i2][1];
     delz = x[i1][2] - x[i2][2];
@@ -310,6 +310,24 @@ void BondBPMProny::compute(int eflag, int vflag)
     rsq = delx * delx + dely * dely + delz * delz;
     r = sqrt(rsq);    
     e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
+
+    // If bond hasn't been set - should be initialized to zero -
+    if (r0 < EPSILON || std::isnan(r0)) {
+      r0 = store_bond(n, i1, i2);
+      ep = 0;
+
+      bondstore[n][0] = r0;
+      bondstore[n][2] = ep;
+      //printf("r0 %f | r %f | ep %f\n",r0,r,ep);
+      for (m = 0; m < tb->ninput; m++ ) {
+        bondstore[n][m+3] = 0;
+      }
+
+      printf("iatom %i | jatom %i | r0 %f |\n",tag[i1],tag[i2],r0);
+      if (tag[i1]==95 && tag[i2]==97) {
+        printf("r0 %f | r %f | ep %f\n",r0,r,ep);
+      }
+    }
 
     // update bond length in bondstore
     bondstore[n][1] = r;
