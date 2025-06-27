@@ -463,7 +463,7 @@ void FixBondDynamic::post_integrate()
       if (kd == 0 && icritical != 1) continue; 
 
       // if breaking was successful, update fbd to -tag
-      fbd[i][b] *= -1;
+      fbd[i][b] *= -2;
 
       // find the entry of atom j and update its fbd as well
       // if j is a ghost atom, it will do this on its own processor
