@@ -30,6 +30,7 @@
 #include "respa.h"
 #include "update.h"
 #include <iostream>
+#include "fix_bond_history.h"
 
 #include <cstring>
 #include "math_const.h"
@@ -230,6 +231,10 @@ void FixBondDynamic::init()
 
   // need a half neighbor list, built every Nevery steps
   neighbor->add_request(this, NeighConst::REQ_OCCASIONAL);
+
+  // find instances of bond history to delete/shift data
+  histories = modify->get_fix_by_style("BOND_HISTORY");
+  n_histories = histories.size();
 
 }
 
@@ -946,6 +951,127 @@ void FixBondDynamic::post_integrate()
 
 void FixBondDynamic::process_broken(int i, int j)
 {
+// First add the pair to new_broken_pairs
+  auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
+  new_broken_pairs.push_back(tag_pair);
+
+  int m, n, l, nmax;
+
+  // Manually search and remove from atom arrays
+  // need to remove in case special bonds arrays rebuilt
+  int nlocal = atom->nlocal;
+
+  tagint *tag = atom->tag;
+  tagint **bond_atom = atom->bond_atom;
+  int **bond_type = atom->bond_type;
+  int *num_bond = atom->num_bond;
+
+  int **bondlist = neighbor->bondlist;
+  int nbondlist = neighbor->nbondlist;
+
+  // update bond list
+  for (l = 0; l < nbondlist; l++) {
+    if (bondlist[l][2] != btype) continue;
+
+    if ((i == bondlist[l][0]) && (j == bondlist[l][1]) || (j == bondlist[l][0]) && (i == bondlist[l][1])) {
+        //bondlist[l][2] = 0;
+        //printf("In dynamic\n");
+    }
+  }
+  
+  if (i < nlocal) {
+    
+    for (m = (num_bond[i] - 1); m >= 0; m--) {
+      if (bond_atom[i][m] == tag[j]) {
+
+        nmax = num_bond[i] - 1;
+        if (m == nmax) {
+          if (n_histories > 0)
+            for (auto &ihistory : histories)
+              dynamic_cast<FixBondHistory *>(ihistory)->delete_history(i, m);
+              printf("i %i, m %i\n",i,m);
+        } else {
+          bond_type[i][m] = bond_type[i][nmax];
+          bond_atom[i][m] = bond_atom[i][nmax];
+          if (n_histories > 0) {
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->shift_history(i, m, nmax);
+              fix_bond_history->delete_history(i, nmax);
+            }
+          }
+        }
+        bond_type[i][nmax] = 0;
+        num_bond[i]--;
+        break;
+      }
+    }
+  }
+
+  if (j < nlocal) {
+    
+    for (n = (num_bond[j] - 1); n >= 0; n--) {
+      if (bond_atom[j][n] == tag[i]) {
+
+        nmax = num_bond[j] - 1;
+        if (n == nmax) {
+          if (n_histories > 0)
+            for (auto &ihistory : histories)
+              dynamic_cast<FixBondHistory *>(ihistory)->delete_history(j, n);
+        } else {
+          bond_type[j][n] = bond_type[j][nmax];
+          bond_atom[j][n] = bond_atom[j][nmax];
+          if (n_histories > 0) {
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->shift_history(j, n, nmax);
+              fix_bond_history->delete_history(j, nmax);
+            }
+          }
+        }
+        bond_type[j][nmax] = 0;
+        num_bond[j]--;
+        break;
+      }
+    }
+  }
+
+  printf("hey\n");
+
+  // Update special neighbor list
+  tagint *slist;
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+
+  // remove i from special bond list for atom j and vice versa
+  // ignore n2, n3 since 1-3, 1-4 special factors required to be 1.0
+  if (i < nlocal) {
+    slist = special[i];
+    int n1 = nspecial[i][0];
+    int m;
+    for (m = 0; m < n1; m++)
+      if (slist[m] == tag[j]) break;
+    for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
+    nspecial[i][0]--;
+    nspecial[i][1] = nspecial[i][2] = nspecial[i][0];
+  }
+
+  if (j < nlocal) {
+    slist = special[j];
+    int n1 = nspecial[j][0];
+    int m;
+    for (int m = 0; m < n1; m++)
+      if (slist[m] == tag[i]) break;
+    for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
+    nspecial[j][0]--;
+    nspecial[j][1] = nspecial[j][2] = nspecial[j][0];
+  }
+
+}
+
+/* 
+void FixBondDynamic::process_broken(int i, int j)
+{
   
   // First add the pair to new_broken_pairs
   auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
@@ -960,7 +1086,7 @@ void FixBondDynamic::process_broken(int i, int j)
   int **bond_type = atom->bond_type;
   int *num_bond = atom->num_bond;
   
-
+  printf("hey\n");
   if (i < nlocal) {
     int n = num_bond[i];
 
@@ -970,6 +1096,7 @@ void FixBondDynamic::process_broken(int i, int j)
         for (int k = m; k < n - 1; k++) {
           bond_type[i][k] = bond_type[i][k + 1];
           bond_atom[i][k] = bond_atom[i][k + 1];
+          printf("i %i | k %i \n",i,k);
         }
         num_bond[i]--;
         break;
@@ -987,6 +1114,7 @@ void FixBondDynamic::process_broken(int i, int j)
         for (int k = m; k < n - 1; k++) {
           bond_type[j][k] = bond_type[j][k + 1];
           bond_atom[j][k] = bond_atom[j][k + 1];
+          printf("j %i | k %i \n",j,k);
         }
         num_bond[j]--;
         break;
@@ -1026,8 +1154,7 @@ void FixBondDynamic::process_broken(int i, int j)
 
 }
 
-/* --------------------------------------------------------------------- */
-
+*/
 void FixBondDynamic::process_created(int i, int j)
 {
 

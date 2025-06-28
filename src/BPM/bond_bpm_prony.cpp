@@ -145,7 +145,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
         fix_bond_history->update_atom_value(j, m, 1, r); //rn
         fix_bond_history->update_atom_value(j, m, 2, 0); //ep
 
-        type = bond_type[i][m];
+        type = bond_type[j][m];
         const Table *tb = &tables[tabindex[type]];
         for (int l = 0; l < tb->ninput; l++ ) {
 
@@ -158,12 +158,13 @@ double BondBPMProny::store_bond(int n, int i, int j)
         dt_temp = dt;
 
         // Internal stress variable
-        fix_bond_history->update_atom_value(j, m, l+3, 0);
+        fix_bond_history->update_atom_value(j, m, l+3, 0);     
+
         }
       }
     }
   }
-
+  //fix_bond_history->pre_exchange();
   return r;
 }
 
@@ -271,14 +272,10 @@ void BondBPMProny::compute(int eflag, int vflag)
 
   for (n = 0; n < nbondlist; n++) {
     
+    //printf("precheck: r0 %f\n",bondstore[n][0]);
 
-    //printf(bondlist[n][2])
     // skip bond if already broken
     if (bondlist[n][2] <= 0) {
-      // need to check if bond has been removed
-      //delete_history(int i, int m)
-      //printf("Hey");
-      //bondstore[n][0] = 0;
       continue;
     };
 
@@ -320,18 +317,17 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     // If bond hasn't been set - should be initialized to zero -
     if (r0 < EPSILON || std::isnan(r0)) {
-      r0 = store_bond(n, i1, i2);
-      ep = 0;
-
-      bondstore[n][0] = r0;
-      bondstore[n][2] = ep;
+      
+      bondstore[n][0] = store_bond(n, i1, i2);
+      bondstore[n][2] = 0;
       //printf("r0 %f | r %f | ep %f\n",r0,r,ep);
       for (m = 0; m < tb->ninput; m++ ) {
-        bondstore[n][m+3] = 0;
+        //bondstore[n][m+3] = 0;
+        //printf("bondid %i | precheck: hn %f\n",n,bondstore[n][m+3]);
       }
-
-      //printf("iatom %i | jatom %i | r0 %f |\n",tag[i1],tag[i2],r0);
     }
+
+    //printf("postcheck: r0 %f\n",bondstore[n][0]);
 
     // update bond length in bondstore
     bondstore[n][1] = r;
@@ -385,6 +381,8 @@ void BondBPMProny::compute(int eflag, int vflag)
 
       // Get bond history variable
       Hn = bondstore[n][m+3];
+      Hn = 0;
+      //printf("bondid %i | precheck: hn %f\n",n,bondstore[n][m+3]);
 
       if (normalize_flag) {
         term1 = exp_j * Hn;
@@ -398,8 +396,11 @@ void BondBPMProny::compute(int eflag, int vflag)
       // Update bond history variable
       Hn = term1 + term2;
       bondstore[n][m+3] = Hn;
-
+      //printf("r0 %f | Bondforce %f | Internal force %f |\n",r0,fbond,Hn);
     }
+
+    printf("bondid %i | postcompute: r0 %f | r %f | ep %f | hn %f | \n",n,bondstore[n][0],bondstore[n][1],bondstore[n][2],bondstore[n][3]);
+    
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -668,6 +669,9 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
+
+      
+      //printf("i %i | n %i \n",i,n);
 
       r0 = fix_bond_history->get_atom_value(i, n, 0);
       rn = fix_bond_history->get_atom_value(i, n, 1);

@@ -74,6 +74,9 @@ class FixBondDynamic : public Fix {
   class RanMars *random;
   class NeighList *list;
 
+  int n_histories;
+  std::vector<Fix *> histories;
+
   // Flag for initializing fbd
   int countflag;
 
