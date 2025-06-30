@@ -25,6 +25,7 @@
 #include "update.h"
 #include "table_file_reader.h"
 
+#include <iostream>
 #include <cmath>
 #include <cstring>
 
@@ -52,13 +53,15 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
-  single_extra = 4;
-  svector = new double[4];
+  single_extra = 5;
+  svector = new double[5];
 
   nmax = 0;
 
   comm_forward = 1;
   comm_reverse = 1;
+
+  //next_reneighbor = -1;
 
   dt_temp = 0;
 }
@@ -111,13 +114,19 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
   r = sqrt(delx * delx + dely * dely + delz * delz);
 
+  //printf("r  storebond %f |\n",r);
+  bondstore[n][0] = r;
+  bondstore[n][1] = r;
+  bondstore[n][2] = 0;
+  
+
   if (i < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[i]; m++) {
       if (atom->bond_atom[i][m] == tag[j]) { 
         fix_bond_history->update_atom_value(i, m, 0, r); // r0
         fix_bond_history->update_atom_value(i, m, 1, r); // rn
         fix_bond_history->update_atom_value(i, m, 2, 0); // ep
-      
+        
         type = bond_type[i][m];
         const Table *tb = &tables[tabindex[type]];
         for (int l = 0; l < tb->ninput; l++ ) {
@@ -136,6 +145,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
         }  
       }
     }
+    //fix_bond_history->post_neighbor();
   }
 
   if (j < atom->nlocal) {
@@ -163,6 +173,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
         }
       }
     }
+    //fix_bond_history->post_neighbor();
   }
   //fix_bond_history->pre_exchange();
   return r;
@@ -182,6 +193,8 @@ void BondBPMProny::store_data()
   int **bond_type = atom->bond_type;
 
   double **bondstore = fix_bond_history->bondstore;
+  //fix_bond_history->stored_flag = false;
+  //fix_bond_history->post_neighbor();
 
   for (i = 0; i < atom->nlocal; i++) {
     for (m = 0; m < atom->num_bond[i]; m++) {
@@ -232,7 +245,6 @@ void BondBPMProny::store_data()
 
     }
   }
-
   fix_bond_history->post_neighbor();
 }
 
@@ -271,8 +283,6 @@ void BondBPMProny::compute(int eflag, int vflag)
   double **bondstore = fix_bond_history->bondstore;
 
   for (n = 0; n < nbondlist; n++) {
-    
-    //printf("precheck: r0 %f\n",bondstore[n][0]);
 
     // skip bond if already broken
     if (bondlist[n][2] <= 0) {
@@ -282,17 +292,14 @@ void BondBPMProny::compute(int eflag, int vflag)
     i1 = bondlist[n][0];
     i2 = bondlist[n][1];
     type = bondlist[n][2];
-    r0 = bondstore[n][0];
-    rn = bondstore[n][1];
-    ep = bondstore[n][2];
+    r0 = bondstore[n][0]; 
 
-    //printf("C bondlength %f %f\n",r0,rn);
+    const Table *tb = &tables[tabindex[type]];
 
+    // Update table (exponential constants) if the timestep has changed
     if (!(dt == dt_temp)) {
       update_table(type);
     }
-
-    const Table *tb = &tables[tabindex[type]];
 
     // Ensure pair is always ordered to ensure numerical operations
     // are identical to minimize the possibility that a bond straddling
@@ -303,9 +310,10 @@ void BondBPMProny::compute(int eflag, int vflag)
       i2 = itmp;
     }
 
-    //if (((tag[i1] == 78) && (tag[i2] == 98)) || ((tag[i1] == 98) && (tag[i2] == 78))) {
-    //  printf("r0 %f | \n",r0);
-    //}
+    // If bond hasn't been set - should be initialized to zero - (e.g. pour, fix bond/dynamic)
+    if (r0 < EPSILON || std::isnan(r0)) {
+      r0 =store_bond(n, i1, i2);
+    }
 
     delx = x[i1][0] - x[i2][0];
     dely = x[i1][1] - x[i2][1];
@@ -315,20 +323,9 @@ void BondBPMProny::compute(int eflag, int vflag)
     r = sqrt(rsq);    
     e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
-    // If bond hasn't been set - should be initialized to zero -
-    if (r0 < EPSILON || std::isnan(r0)) {
-      
-      bondstore[n][0] = store_bond(n, i1, i2);
-      bondstore[n][2] = 0;
-      //printf("r0 %f | r %f | ep %f\n",r0,r,ep);
-      for (m = 0; m < tb->ninput; m++ ) {
-        //bondstore[n][m+3] = 0;
-        //printf("bondid %i | precheck: hn %f\n",n,bondstore[n][m+3]);
-      }
-    }
-
-    //printf("postcheck: r0 %f\n",bondstore[n][0]);
-
+    rn = bondstore[n][1]; // This needs to be after bonds have been initialized
+    ep = bondstore[n][2];
+   
     // update bond length in bondstore
     bondstore[n][1] = r;
     
@@ -353,8 +350,9 @@ void BondBPMProny::compute(int eflag, int vflag)
 
       r0p = (1.0 + ep) * r0;
       bondstore[n][2] = ep;
-    } else
+    } else {
       r0p = r0;
+    }
 
     // rate-independent part of bond force
     rinv = 1.0 / r;
@@ -367,8 +365,9 @@ void BondBPMProny::compute(int eflag, int vflag)
       } else {
         fbond = k0[type] * pow(dr,alpha[type]);
       }
-    } else
+    } else {
       fbond = k0[type] * (r0p - r);
+    }
 
     // rate-dependent part of bond force
     // Loop through Maxwell elements
@@ -381,26 +380,20 @@ void BondBPMProny::compute(int eflag, int vflag)
 
       // Get bond history variable
       Hn = bondstore[n][m+3];
-      Hn = 0;
-      //printf("bondid %i | precheck: hn %f\n",n,bondstore[n][m+3]);
 
       if (normalize_flag) {
         term1 = exp_j * Hn;
         term2 =  k_temp * ((rn - r) / r0) * (1 - exp_j) / (dt * k_temp / eta_temp);
-      } else
+      } else {
         term1 = exp_j * Hn;
         term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
-
+      }
       fbond += (term1 + term2);
       
       // Update bond history variable
       Hn = term1 + term2;
       bondstore[n][m+3] = Hn;
-      //printf("r0 %f | Bondforce %f | Internal force %f |\n",r0,fbond,Hn);
     }
-
-    printf("bondid %i | postcompute: r0 %f | r %f | ep %f | hn %f | \n",n,bondstore[n][0],bondstore[n][1],bondstore[n][2],bondstore[n][3]);
-    
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -478,22 +471,6 @@ void BondBPMProny::coeff(int narg, char **arg)
 
   double alpha_one = utils::numeric(FLERR, arg[6], false, lmp);
   double eplastic_one = utils::numeric(FLERR, arg[7], false, lmp);
-
-  //parse remaining args
-  //int iarg = 6;
-  //while (iarg < narg) {
-  //  if (strcmp(arg[iarg],"nonlinear") == 0) {
-  //    if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
-  //    Alph = utils::numeric(FLERR, arg[iarg+1], false, lmp);
-  //    nonlinear_flag = 1;
-  //    iarg += 2;
-  //  } else if (strcmp(arg[iarg],"plastic") == 0) {
-  //    if (iarg+2 > narg) error->all(FLERR,"Incorrect args for bond coefficients");
-  //    Ep = utils::numeric(FLERR, arg[iarg+1], false, lmp); 
-  //    plastic_flag = 1;
-  //    iarg += 2;
-  //  } else error->all(FLERR,"Incorrect args for bond coefficients");
-  // }
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -754,6 +731,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   svector[1] = (1.0 + ep) * r0;
   svector[2] = fel;
   svector[3] = fint;
+  svector[4] = Hn;
 
   return 0.0;
 }
