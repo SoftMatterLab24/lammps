@@ -30,8 +30,8 @@ Syntax
          fraction = create a bond with this proabilitiy if otherwise eligible
        *mol* values = 0 or 1 or 2
          0 = any atom can bond if otherwise eligible (default)
-         1 = only atoms on different molecule can bond
-         2 = only atoms on same molecule can bond
+         1 = only atoms on different molecules can bond
+         2 = only atoms on same molecules can bond
        *critical* values rcrit
          rcrit = length at which bonds permanently break (distance units)
        *rouse* values b0
