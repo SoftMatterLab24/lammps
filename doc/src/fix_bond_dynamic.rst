@@ -26,8 +26,9 @@ Syntax
          maxbond = max # of bonds of bondtype the itype and jtype atoms can have
        *seed* values = seed
          seed = random number seed (positive integer)
-       *prob* values = fraction
-         fraction = create a bond with this proabilitiy if otherwise eligible
+       *prob* values = Pattach Pdettach
+         Pattach = create a bond with this proabilitiy if otherwise eligible
+         Pdettach = remove a bond with this proabilitiy if otherwise eligible
        *mol* values = 0 or 1 or 2
          0 = any atom can bond if otherwise eligible (default)
          1 = only atoms on different molecules can bond
@@ -61,47 +62,73 @@ Examples
 Description
 """""""""""
 
-Create bonds between pairs of atoms as a simulation runs according to
-specified criteria.  This can be used to model the cross-linking of
-polymers, the formation of a percolation network, etc.  In this
-context, a bond means an interaction between a pair of atoms computed
-by the :doc:`bond_style <bond_style>` command.  Once the bond is created
-it will be permanently in place.  Optionally, the creation of a bond
-can also create angle, dihedral, and improper interactions that the bond
-is part of.  See the discussion of the *atype*, *dtype*, and *itype*
-keywords below.
+Dynamically attach and/or dettach bonds between pairs of atoms as a
+simulation runs according to specified criteria. This can be used to
+model the cross-linking of polymers, the formation of a percolation
+network, or the continual topological reformation of transient networks, etc. 
+In this context, a bond means an interaction between a pair of atoms computed
+by the :doc:`bond_style <bond_style>` command. This process is different from 
+:doc:`fix bond/create <fix_bond_create>` in that bonds are not permanently
+created. The fix first establishes whether any bonds should be removed before 
+attempting to create new bonds.
 
-This process is different than a :doc:`pair-wise <pair_style>` bond-order
-potential such as Tersoff or AIREBO, which infer bonds and many-body
-interactions based on the current geometry of a small cluster of atoms
-and effectively create and destroy bonds and higher-order many-body
-interactions from time step to time step as the atoms move.
+For bond removal, a check for possible bond breaking is performed every *Nevery* time steps.
+If two atoms :math:`i` and :math:`j` are within a distance *Rcut* of each
+other, atom :math:`i` is of type *itype*, atom :math:`j` is of type *jtype*,
+and both :math:`i` and :math:`j` are in the specified fix group, then if a bond is of type *btype*
+then the bond is labeled as a "possible" bond break. An eligible bond will break with a 
+discrete dettachement probability defined as:
 
-A check for possible new bonds is performed every *Nevery* time steps.
-If two atoms :math:`i` and :math:`j` are within a distance *Rmin* of each
+.. math::
+
+   \delta P_d = 1 - \exp{\left( -kd \Delta t \right) } 
+
+where :math:`kd` is the dettachment rate, and :math:`\Delta t` is the timestep. For every 
+eligible bond if the probability constraint is satisfied then the bond is removed, otherwise it
+remains.
+
+For bond creation, a check for possible new bonds is performed every *Nevery* time steps.
+If two atoms :math:`i` and :math:`j` are within a distance *Rcut* of each
 other, atom :math:`i` is of type *itype*, atom :math:`j` is of type *jtype*,
 and both :math:`i` and :math:`j` are in the specified fix group, then if a bond
 does not already exist between atoms :math:`i` and :math:`j`, and if both
 :math:`i` and :math:`j` meet their respective *maxbond* requirements (explained
-below), then :math:`i` and :math:`j` are labeled as a "possible" bond pair.
+below), then :math:`i` and :math:`j` are labeled as a "possible" bond pair. 
+If several atoms are close to an atom, it may have multiple possible bond partners.
+An eligible bond will form with a discrete attachement probability defined as:
 
-If several atoms are close to an atom, it may have multiple possible
-bond partners.  Every atom checks its list of possible bond partners
-and labels the closest such partner as its "sole" bond partner.  After
-this is done, if atom :math:`i` has atom :math:`j` as its sole partner and
-atom :math:`j` has atom :math:`i` as its sole partner, then the
-:math:`i,j` bond is "eligible" to be formed.
+.. math::
 
-Note that these rules mean that an atom will only be part of at most one
-created bond on a given time step.  It also means that if atom :math:`i`
-chooses atom :math:`j` as its sole partner, but atom :math:`j` chooses atom
-:math:`k` as its sole partner (because :math:`R_{jk} < R_{ij}`), then atom
-:math:`i` will not form a bond on this time step, even if it has other possible
-bond partners.
+   \delta P_a = 1 - \exp{\left( -ka \Delta t \right) } 
 
-It is permissible to have *itype* = *jtype*\ .  *Rmin* must be :math:`\leq` the
+where :math:`kd` is the dettachment rate, and :math:`\Delta t` is the timestep. If the
+probability constraint is satisfied, then the bond will be formed. Note that with this
+method, each atom may be part of multiple created bonds on a given time step.
+
+It is permissible to have *itype* = *jtype*\ .  *Rcut* must be :math:`\leq` the
 pair-wise cutoff distance between *itype* and *jtype* atoms, as defined
 by the :doc:`pair_style <pair_style>` command.
+
+
+#### KEYWORDS
+
+The *maxbond* keyword can be used to limit the number of bonds formed
+
+
+The *seed* keyword can be used to specifiy the processor-unique seed 
+used to initialized the Marsaglia random number generator. By default the
+seed is 12345. The *value* setting must be a positive integer. 
+
+The *prob* keyword can be used to directly set the attachment and
+dettachement probabilities. Both the *Pattach* and *Pdettach* settings
+must be values between 0.0 and 1.0. For bond creation a uniform random 
+number between 0.0 and 1.0 is generated and the eligible bond 
+is only created if the random number is less than *Pattach*. Likewise,
+for bond deletion a uniform random  number between 0.0 and 1.0 is generated 
+and the eligible bond  is only removed if the random number is less than *Pdettach*.
+The *prob* keyword cannot be used with keyword *rouse* or *bell* or *catch*.
+
+
 
 The *iparam* and *jparam* keywords can be used to limit the bonding
 functionality of the participating atoms.  Each atom keeps track of
