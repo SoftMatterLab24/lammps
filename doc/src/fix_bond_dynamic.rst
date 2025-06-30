@@ -27,8 +27,8 @@ Syntax
        *seed* values = seed
          seed = random number seed (positive integer)
        *prob* values = Pattach Pdettach
-         Pattach = create a bond with this proabilitiy if otherwise eligible
-         Pdettach = remove a bond with this proabilitiy if otherwise eligible
+         Pattach = create a bond with this proabilitiy if otherwise eligible (fraction)
+         Pdettach = remove a bond with this proabilitiy if otherwise eligible (fraction)
        *mol* values = 0 or 1 or 2
          0 = any atom can bond if otherwise eligible (default)
          1 = only atoms on different molecules can bond
@@ -112,8 +112,21 @@ by the :doc:`pair_style <pair_style>` command.
 
 #### KEYWORDS
 
-The *maxbond* keyword can be used to limit the number of bonds formed
+The *maxbond* keyword can be used to limit the number of bonds allowed. 
+If either atom :math:`i` of type *itype* or atom :math:`j` of type *jtype* 
+has *maxbond* bonds (set by value), then a new bond will not be formed.
 
+.. note::
+
+    To create a new bond, the internal LAMMPS data structures that
+    store this information must have space for it.  When LAMMPS is
+    initialized from a data file, the list of bonds is scanned and the
+    maximum number of bonds per atom is tallied.  If some atom will
+    acquire more bonds than this limit as this fix operates, then the
+    "extra bond per atom" parameter must be set to allow for it. Therefore, 
+    the value of *maxbond* should be less than or equal to what the "extra 
+    bond per atom" parameter has been set to. See the :doc:`read_data <read_data>` 
+    or :doc:`create_box <create_box>` command for more details. 
 
 The *seed* keyword can be used to specifiy the processor-unique seed 
 used to initialized the Marsaglia random number generator. By default the
@@ -128,7 +141,20 @@ for bond deletion a uniform random  number between 0.0 and 1.0 is generated
 and the eligible bond  is only removed if the random number is less than *Pdettach*.
 The *prob* keyword cannot be used with keyword *rouse* or *bell* or *catch*.
 
+The *mol* keyword can be used to limit the bonding functionality of
+the participating atoms. If the value of *mol* is 1, then in addition 
+to the previous constraints, atom :math:`i` will also check to see if 
+atom :math:`j` belongs to a different molecule. If this is true, and the
+other conditions are met, then :math:`i` and :math:`j` are labeled as a 
+"possible" bond pair. If the value of *mol* is 2 then atom :math:`i` will only
+label atom :math:`j` as a possible pair if they both belong to the same
+molecule. By default *mol* value is 0, in which case atoms do not
+check what molecule they belong to.
 
+The *critical* keyword specifies whether bonds permanently rupture after
+exceeding a critial legnth set by value *rcrit*. This process is performed
+before dettachement and attachment, such that when a bond exceeds its 
+critical length, it is immediately labeled for removal. 
 
 The *iparam* and *jparam* keywords can be used to limit the bonding
 functionality of the participating atoms.  Each atom keeps track of
