@@ -8,37 +8,41 @@ Syntax
 
 .. code-block:: LAMMPS
 
-   fix ID group-ID style Nevery itype jtype Rmin bondtype keyword values ...
+   fix ID group-ID style Nevery itype jtype bondtype ka kd Rcut keyword values ...
 
 * ID, group-ID are documented in :doc:`fix <fix>` command
-* style = *bond/create* or *bond/create/angle*
-* Nevery = attempt bond creation every this many steps
+* Nevery = attempt bond attachment and dettachment every this many steps
 * itype,jtype = atoms of itype can bond to atoms of jtype (1-Ntypes or type label)
-* Rmin = two atoms separated by less than Rmin can bond (distance units)
-* bondtype = type of created bonds (integer or type label)
+* bondtype = type of bond modified by this fix
+* ka = attachment rate
+* kd = dettachment rate
+* Rcut = two atoms separated by less than Rcut can attach or dettach (distance units)
 * zero or more keyword/value pairs may be appended to args
-* keyword = *iparam* or *jparam* or *prob* or *atype* or *dtype* or *itype* or *aconstrain*
+* keyword = *maxbond* or *seed* or *prob* or *mol* or *critical* or *rouse* or *bell* or *catch*
 
   .. parsed-literal::
 
-       *iparam* values = maxbond, newtype
-         maxbond = max # of bonds of bondtype the itype atom can have
-         newtype = change the itype atom to this type when maxbonds exist (1-Ntypes or type label)
-       *jparam* values = maxbond, newtype
-         maxbond = max # of bonds of bondtype the jtype atom can have
-         newtype = change the jtype atom to this type when maxbonds exist (1-Ntypes or type label)
-       *prob* values = fraction seed
-         fraction = create a bond with this probability if otherwise eligible
+       *maxbond* values = maxbond
+         maxbond = max # of bonds of bondtype the itype and jtype atoms can have
+       *seed* values = seed
          seed = random number seed (positive integer)
-       *atype* value = angletype
-         angletype = type of created angles (integer or type label)
-       *dtype* value = dihedraltype
-         dihedraltype = type of created dihedrals (integer or type label)
-       *itype* value = impropertype
-         impropertype = type of created impropers (integer or type label)
-       *aconstrain* value = amin amax
-         amin = minimal angle at which new bonds can be created
-         amax = maximal angle at which new bonds can be created
+       *prob* values = fraction
+         fraction = create a bond with this proabilitiy if otherwise eligible
+       *mol* values = 0 or 1 or 2
+         0 = any atom can bond if otherwise eligible (default)
+         1 = only atoms on different molecule can bond
+         2 = only atoms on same molecule can bond
+       *critical* values rcrit
+         rcrit = length at which bonds permanently break (distance units)
+       *rouse* values b0
+         b0 = 
+       *bell* values f0 kmax
+         f0 =
+         kmax =
+       *catch* values fs0 fc0 kc0
+         fs0 =
+         fc0 =
+         kc0 =
 
 Examples
 """"""""
