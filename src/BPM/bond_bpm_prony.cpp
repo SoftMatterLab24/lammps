@@ -36,7 +36,7 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), alpha(nullptr), eplastic(nullptr),
+    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr),
     id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
@@ -85,7 +85,7 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(k0);
     memory->destroy(ecrit);
     memory->destroy(gamma);
-    memory->destroy(alpha);
+    memory->destroy(lamc);
     memory->destroy(eplastic);
     
   }
@@ -265,6 +265,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, r0, rn , r0p, rinv,  smooth, fbond, dot;
   double k_temp, eta_temp, exp_j, Hn, term1, term2, term3;
+  double numer, denom;
 
   ev_init(eflag, vflag);
 
@@ -359,15 +360,21 @@ void BondBPMProny::compute(int eflag, int vflag)
     if (normalize_flag) {
       fbond = -k0[type] * (e - ep);
     } else if (nonlinear_flag) {
-      double dr = (r0p - r);
-      if (dr < 0) {
-        fbond = -k0[type] * pow(-dr,alpha[type]);
-      } else {
-        fbond = k0[type] * pow(dr,alpha[type]);
-      }
+      double lam = (r - r0p) / (r0p * lamc[type] - r0p);
+      numer = (r - r0p) * (3 - (lam * lam));
+      denom = 6 * (1 - (lam * lam));
+      fbond = -k0[type] * numer / denom;
     } else {
       fbond = k0[type] * (r0p - r);
     }
+
+
+    //printf("r %f | r0 %f | rc %f | fel %f \n",r,r0p,r0p * lamc[type],fbond);
+    // nonlinear - pade
+    //lam = r / lamc;
+    //numer = lam * (3 - (lam * lam));
+    //denom = 1 - (lam * lam);
+
 
     // rate-dependent part of bond force
     // Loop through Maxwell elements
@@ -439,7 +446,7 @@ void BondBPMProny::allocate()
   memory->create(k0, np1, "bond:k0");
   memory->create(ecrit, np1, "bond:ecrit");
   memory->create(gamma, np1, "bond:gamma");
-  memory->create(alpha,np1,"bond:alpha");
+  memory->create(lamc,np1,"bond:lamc");
   memory->create(eplastic,np1,"bond:eplastic");
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
@@ -469,15 +476,19 @@ void BondBPMProny::coeff(int narg, char **arg)
   if (comm->me == 0) read_table(tb, arg[4], arg[5]);
   bcast_table(tb);
 
-  double alpha_one = utils::numeric(FLERR, arg[6], false, lmp);
+  double lamc_one = utils::numeric(FLERR, arg[6], false, lmp);
   double eplastic_one = utils::numeric(FLERR, arg[7], false, lmp);
+
+  if ((nonlinear_flag) && (lamc_one <= 1)) {
+    error->all(FLERR, "Incorrect bond coefficient maximum extension must be greater than one");
+  }
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     k0[i] = k_zero;
     ecrit[i] = ecrit_one;
     gamma[i] = gamma_one;
-    alpha[i] = alpha_one;
+    lamc[i] = lamc_one;
     eplastic[i] = eplastic_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
@@ -543,6 +554,9 @@ void BondBPMProny::settings(int narg, char **arg)
   if (smooth_flag && !break_flag)
     error->all(FLERR, "Illegal bond bpm command, must turn off smoothing with break no option");
 
+  if (nonlinear_flag && !break_flag)
+    error->all(FLERR, "Illegal bond bpm command, must turn on breaking with nonlinear yes option");
+
 }
 
 /* ----------------------------------------------------------------------
@@ -557,7 +571,7 @@ void BondBPMProny::write_restart(FILE *fp)
   fwrite(&k0[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&ecrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
-  fwrite(&alpha[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&lamc[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&eplastic[1], sizeof(double), atom->nbondtypes, fp);
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
@@ -578,7 +592,7 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &ecrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &alpha[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &eplastic[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
@@ -588,7 +602,7 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&k0[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&ecrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&alpha[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&eplastic[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
@@ -642,6 +656,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   double r0, rn, r0p, ep;
   double k_temp, eta_temp, exp_j, Hn, term1, term2;
+  double numer, denom;
   double fel, fint;
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
@@ -692,14 +707,11 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     fel = -k0[type] * (e - ep);
     fforce += fel;
   } else if (nonlinear_flag) {
-    double dr = (r0p - r);
-    if (dr < 0) {
-      fel = -k0[type] * pow(-dr,alpha[type]);
-      fforce += fel;
-    } else {
-      fel = k0[type] * pow(dr,alpha[type]);
-      fforce += fel;
-    }
+    double lam = (r - r0p) / (r0p * lamc[type] - r0p);
+    numer =  (r - r0p) * (3 - (lam * lam));
+    denom = 6 * (1 - (lam * lam));
+    fel = -k0[type] * numer / denom;
+    fforce += fel;
   } else
     fel = k0[type] * (r0p - r);
     fforce += fel;
