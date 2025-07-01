@@ -641,7 +641,6 @@ void FixBondDynamic::post_integrate()
         p_attach = 1 - exp(-ka_rouse*DT_EQ);
       }
       if (flag_prob) {
-
         // Set attachment probability directly
         p_attach = prob_attach;
       }
