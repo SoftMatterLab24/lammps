@@ -36,34 +36,32 @@ Syntax
        *critical* values rcrit
          rcrit = length at which bonds permanently break (distance units)
        *rouse* values b0
-         b0 = 
-       *bell* values f0 kmax
-         f0 =
-         kmax =
+         b0 = diffusion lengthscale (distance units)
+       *bell* values f0
+         f0 = force-sensitivity of bond (force units)
        *catch* values fs0 fc0 kc0
-         fs0 =
-         fc0 =
-         kc0 =
+         fs0 = force-sensitivity of the bonds slip barrier (force units)
+         fc0 = force-sensitivity of the bonds catch barrier (force units)
+         kc0 = scale factor for bonds catch barrier (unitless)
 
 Examples
 """"""""
 
 .. code-block:: LAMMPS
 
-   fix 5 all bond/create 10 1 2 0.8 1
-   fix 5 all bond/create 1 3 3 0.8 1 prob 0.5 85784 iparam 2 3
-   fix 5 all bond/create 1 3 3 0.8 1 prob 0.5 85784 iparam 2 3 atype 1 dtype 2
-   fix 5 all bond/create/angle 10 1 2 1.122 1 aconstrain 120 180 prob 1 4928459 iparam 2 1 jparam 2 2
+   fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7
+   fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7 maxbond 8 prob 0.5 0.7 
+   fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7 maxbond 8 critical 1.5
+   fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7 maxbond 8 critical 1.5 rouse 0.5 catch 2 2 1
 
-   labelmap atom 1 c1 2 n2
-   labelmap bond 1 c1-n2
-   fix 5 all bond/create 10 c1 n2 0.8 c1-n2
 
 Description
 """""""""""
 
 Dynamically attach and/or dettach bonds between pairs of atoms as a
-simulation runs according to specified criteria. This can be used to
+simulation runs according to specified criteria. Bond kinetics
+(attachment and dettachment) is treated as a stochastic process, where
+each event is independent, thereby treated as a Poisson process. This can be used to
 model the cross-linking of polymers, the formation of a percolation
 network, or the continual topological reformation of transient networks, etc. 
 In this context, a bond means an interaction between a pair of atoms computed
@@ -155,6 +153,51 @@ The *critical* keyword specifies whether bonds permanently rupture after
 exceeding a critial legnth set by value *rcrit*. This process is performed
 before dettachement and attachment, such that when a bond exceeds its 
 critical length, it is immediately labeled for removal. 
+
+The *rouse* keyword can be used to modify bonds attachment rate ka by
+assuming that bonds must 'explore' their surrounding space through a
+sub-diffusive Rouse process before attaching. Thus, instead of a fixed 
+attachement rate (and thus constant probability) chains rate of attachement 
+scales nonlinearly with the distance between two atoms :math:`r` according to:
+
+.. math::
+
+   k_a^{rouse} = ka \left( \frac{b0}{r} \right)^4
+
+where :math:`ka` is the nominal or fixed attachment rate and
+:math:`b0` is a distance. In the case of polymeric systems, assuming
+flexible ergodic chains, :math:`b0` is the molecular distance travelled
+in time :math:`1/ka`. The *rouse* keyword cannot be used with *prob*.
+
+The *bell* keyword can be used to modify bonds dettachement rate kd
+by assuming bonds dettachment kinetics is force-sensitive. In this case, bonds dettachment
+rate increases exponentially under increasing force given by Bell's model:
+
+.. math::
+
+   k_d^{bell} = kd \exp{ \left( \frac{f}{f0} \right)}
+
+where :math:`kd` is the nominal or fixed dettachment rate, :math:`f` is
+the bonds force, and :math:`f0` characterizes the bonds force-sensitivity. 
+The *bell* keyword cannot be used with keyword *prob* or *catch*.
+
+The *catch* keyword can be used to modify bonds dettachement rate kd
+by assuming bonds dettachment kinetics is force-sensitive. Unlike Bell's model,
+bonds dettachment rate at first decreases before subsequently increasing under
+increasing force. This is achieved with the two-pathway model:
+
+.. math::
+
+   k_d^{catch} = kd \exp{ \left( \frac{f}{fs0} \right)} +  kd kc0 \exp{ \left( \frac{-f}{fc0} \right)}
+
+where :math:`kd` is the nominal or fixed dettachment rate, :math:`f` is
+the bonds force, :math:`fs0` is the force-sensitivity of the slip barrier, 
+:math:`fc0` is the force-sensitivity of the catch barrier, and :math:`kc0` is
+a scale factor that adjusts the fixed dettachment rate of the catch barrier.
+Note that when :math:`kc0` = :math:`0.0` the Bell model is recovered. Also,
+when bond forces are small (i.e 0.0) the detachment rate is :math:`kd * (1 + kc0)`.
+The *catch* keyword cannot be used with keyword *prob* or *bell*.
+
 
 The *iparam* and *jparam* keywords can be used to limit the bonding
 functionality of the participating atoms.  Each atom keeps track of
