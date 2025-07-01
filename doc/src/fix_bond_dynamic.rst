@@ -107,12 +107,10 @@ It is permissible to have *itype* = *jtype*\ .  *Rcut* must be :math:`\leq` the
 pair-wise cutoff distance between *itype* and *jtype* atoms, as defined
 by the :doc:`pair_style <pair_style>` command.
 
-
-#### KEYWORDS
-
 The *maxbond* keyword can be used to limit the number of bonds allowed. 
 If either atom :math:`i` of type *itype* or atom :math:`j` of type *jtype* 
 has *maxbond* bonds (set by value), then a new bond will not be formed.
+By default *maxbond* is set to the "extra bond per atom" parameter.
 
 .. note::
 
@@ -198,76 +196,20 @@ Note that when :math:`kc0` = :math:`0.0` the Bell model is recovered. Also,
 when bond forces are small (i.e 0.0) the detachment rate is :math:`kd * (1 + kc0)`.
 The *catch* keyword cannot be used with keyword *prob* or *bell*.
 
-
-The *iparam* and *jparam* keywords can be used to limit the bonding
-functionality of the participating atoms.  Each atom keeps track of
-how many bonds of *bondtype* it already has.  If atom :math:`i` of type
-*itype* already has *maxbond* bonds (as set by the *iparam*
-keyword), then it will not form any more, and likewise for atom :math:`j`.
-If *maxbond* is set to 0, then there is no limit on the number of bonds
-that can be formed with that atom.
-
-The *newtype* value for *iparam* and *jparam* can be used to change
-the atom type of atom :math:`i` or :math:`j` when it reaches *maxbond* number
-of bonds of type *bondtype*\ .  This means it can now interact in a pair-wise
-fashion with other atoms in a different way by specifying different
-:doc:`pair_coeff <pair_coeff>` coefficients.  If you do not wish the
-atom type to change, simply specify *newtype* as *itype* or *jtype*\ .
-
-The *prob* keyword can also affect whether an eligible bond is
-actually created.  The *fraction* setting must be a value between 0.0
-and 1.0.  A uniform random number between 0.0 and 1.0 is generated and
-the eligible bond is only created if the random number is less than *fraction*.
-
-The *aconstrain* keyword is only available with the fix
-bond/create/angle command.  It allows one to specify minimum and maximum
-angles *amin* and *amax*, respectively, between the two prospective bonding
-partners and a third particle that is already bonded to one of the two
-partners. Such a criterion can be important when new angles are defined
-together with the formation of a new bond.  Without a restriction on the
-permissible angle, and for stiffer angle potentials, very large energies
-can arise and lead to unphysical behavior.
-
 Any bond that is created is assigned a bond type of *bondtype*.
 
 When a bond is created, data structures within LAMMPS that store bond
-topologies are updated to reflect the creation.  If the bond is part of
-new 3-body (angle) or 4-body (dihedral, improper) interactions, you
-can choose to create new angles, dihedrals, and impropers as well using
-the *atype*, *dtype*, and *itype* keywords.  All of these changes
-typically affect pair-wise interactions between atoms that are now part
-of new bonds, angles, etc.
+topologies are updated to reflect the creation. 
+
+When a bond is deleted, data structures within LAMMPS that store bond
+history variables, such as those used by the BPM package, are updated to
+reflect deletion.
 
 .. note::
 
-   One data structure that is not updated when a bond breaks are
-   the molecule IDs stored by each atom.  Even though two molecules
-   become one molecule due to the created bond, all atoms in the new
-   molecule retain their original molecule IDs.
-
-If the *atype* keyword is used and if an angle potential is defined
-via the :doc:`angle_style <angle_style>` command, then any new 3-body
-interactions inferred by the creation of a bond will create new angles
-of type *angletype*, with parameters assigned by the corresponding
-:doc:`angle_coeff <angle_coeff>` command.  Likewise, the *dtype* and
-*itype* keywords will create new dihedrals and impropers of type
-*dihedraltype* and *impropertype*\ .
-
-.. note::
-
-   To create a new bond, the internal LAMMPS data structures that
-   store this information must have space for it.  When LAMMPS is
-   initialized from a data file, the list of bonds is scanned and the
-   maximum number of bonds per atom is tallied.  If some atom will
-   acquire more bonds than this limit as this fix operates, then the
-   "extra bond per atom" parameter must be set to allow for it.  Ditto
-   for "extra angle per atom", "extra dihedral per atom", and "extra
-   improper per atom" if angles, dihedrals, or impropers are being added
-   when bonds are created.  See the :doc:`read_data <read_data>` or
-   :doc:`create_box <create_box>` command for more details.  Note that a
-   data file with no atoms can be used if you wish to add non-bonded
-   atoms via the :doc:`create atoms <create_atoms>` command (e.g., for a
-   percolation simulation).
+   One data structure that is not updated when a bond either breaks or is 
+   created are the molecule IDs stored by each atom. Even with newly created bonds,
+   all atoms in the new "molecule" retain their original molecule IDs.
 
 .. note::
 
@@ -284,29 +226,23 @@ of type *angletype*, with parameters assigned by the corresponding
 
 .. note::
 
-   Even if you do not use the *atype*, *dtype*, or *itype*
-   keywords, the list of topological neighbors is updated for atoms
+   The list of topological neighbors is updated for atoms
    affected by the new bond.  This in turn affects which neighbors are
    considered for pair-wise interactions, using the weighting rules set by
    the :doc:`special_bonds <special_bonds>` command.  Consider a new bond
    created between atoms :math:`i` and :math:`j`.  If :math:`j` has a bonded
-   neighbor :math:`k`, then :math:`k` becomes a second neighbor of :math:`i`.
-   Even if the *atype* keyword is not used to create angle :math:`\angle ijk`,
-   the pair-wise interaction between :math:`i` and :math:`k` could potentially
+   neighbor :math:`k`, then :math:`k` becomes a second neighbor of :math:`i`. 
+   The pair-wise interaction between :math:`i` and :math:`k` could potentially
    be turned off or weighted by the 1--3 weighting specified
-   by the :doc:`special_bonds <special_bonds>` command.  This is the case
-   even if the "angle yes" option was used with that command.  The same
-   is true for third neighbors (1--4 interactions), the *dtype* keyword, and
-   the "dihedral yes" option used with the
-   :doc:`special_bonds <special_bonds>` command.
+   by the :doc:`special_bonds <special_bonds>` command. The same
+   is true for third neighbors (1--4 interactions).
 
 Note that even if your simulation starts with no bonds, you must
 define a :doc:`bond_style <bond_style>` and use the
 :doc:`bond_coeff <bond_coeff>` command to specify coefficients for the
-*bondtype*\ .  Similarly, if new atom types are specified by the
-*iparam* or *jparam* keywords, they must be within the range of atom
-types allowed by the simulation and pair-wise coefficients must be
-specified for the new types.
+*bondtype*\ .  Similarly, the atom types specified by the
+*iype* or *jtype* values must be within the range of atom
+types allowed by the simulation.
 
 Computationally, each time step this fix is invoked, it loops over
 neighbor lists and computes distances between pairs of atoms in the
@@ -318,7 +254,6 @@ should be turned "off" due to a bond creation, because they are now
 excluded by the presence of the bond and the settings of the
 :doc:`special_bonds <special_bonds>` command, will be immediately
 recognized.  All of these operations increase the cost of a time step.
-Thus, you should be cautious about invoking this fix too frequently.
 
 You can dump out snapshots of the current bond topology via the :doc:`dump local <dump>` command.
 
@@ -342,23 +277,10 @@ No information about this fix is written to :doc:`binary restart files
 <restart>`.  None of the :doc:`fix_modify <fix_modify>` options are
 relevant to this fix.
 
-This fix computes two statistics which it stores in a global vector of
-length 2, which can be accessed by various :doc:`output commands
-<Howto_output>`.  The vector values calculated by this fix are
-"intensive".
-
-The two quantities in the global vector are
-
-  (1) number of bonds created on the most recent creation time step
-  (2) cumulative number of bonds created
-
-No parameter of this fix can be used with the *start/stop* keywords of
-the :doc:`run <run>` command.  This fix is not invoked during :doc:`energy minimization <minimize>`.
-
 Restrictions
 """"""""""""
 
-This fix is part of the MC package.  It is only enabled if LAMMPS was
+This fix is part of the TNT package.  It is only enabled if LAMMPS was
 built with that package.  See the :doc:`Build package <Build_package>`
 doc page for more info.
 
@@ -371,5 +293,5 @@ Related commands
 Default
 """""""
 
-The option defaults are iparam = (0,itype), jparam = (0,jtype), and
-prob = 1.0.
+The option defaults are seed = 12345, mol = 0, and
+maxbond = extra/bond/per/atom value.
