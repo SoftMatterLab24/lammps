@@ -265,7 +265,6 @@ void BondBPMProny::compute(int eflag, int vflag)
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, r0, rn , r0p, rinv,  smooth, fbond, dot;
   double k_temp, eta_temp, exp_j, Hn, term1, term2, term3;
-  double numer, denom;
 
   ev_init(eflag, vflag);
 
@@ -361,9 +360,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       fbond = -k0[type] * (e - ep);
     } else if (nonlinear_flag) {
       double lam = (r - r0p) / (r0p * lamc[type] - r0p);
-      numer = (r - r0p) * (3 - (lam * lam));
-      denom = 6 * (1 - (lam * lam));
-      fbond = -k0[type] * numer / denom;
+      fbond = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
     } else {
       fbond = k0[type] * (r0p - r);
     }
@@ -656,7 +653,6 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   double r0, rn, r0p, ep;
   double k_temp, eta_temp, exp_j, Hn, term1, term2;
-  double numer, denom;
   double fel, fint;
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
@@ -708,9 +704,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     fforce += fel;
   } else if (nonlinear_flag) {
     double lam = (r - r0p) / (r0p * lamc[type] - r0p);
-    numer =  (r - r0p) * (3 - (lam * lam));
-    denom = 6 * (1 - (lam * lam));
-    fel = -k0[type] * numer / denom;
+    fel = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
     fforce += fel;
   } else
     fel = k0[type] * (r0p - r);
