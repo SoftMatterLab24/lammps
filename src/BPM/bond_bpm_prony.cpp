@@ -61,8 +61,6 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   comm_forward = 1;
   comm_reverse = 1;
 
-  //next_reneighbor = -1;
-
   dt_temp = 0;
 }
 
@@ -114,7 +112,6 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
   r = sqrt(delx * delx + dely * dely + delz * delz);
 
-  //printf("r  storebond %f |\n",r);
   bondstore[n][0] = r;
   bondstore[n][1] = r;
   bondstore[n][2] = 0;
@@ -145,7 +142,6 @@ double BondBPMProny::store_bond(int n, int i, int j)
         }  
       }
     }
-    //fix_bond_history->post_neighbor();
   }
 
   if (j < atom->nlocal) {
@@ -173,9 +169,12 @@ double BondBPMProny::store_bond(int n, int i, int j)
         }
       }
     }
-    //fix_bond_history->post_neighbor();
   }
-  //fix_bond_history->pre_exchange();
+
+  if (r < EPSILON) {
+    error->one(FLERR, "Bond reference length too small");
+  }
+
   return r;
 }
 
@@ -193,8 +192,6 @@ void BondBPMProny::store_data()
   int **bond_type = atom->bond_type;
 
   double **bondstore = fix_bond_history->bondstore;
-  //fix_bond_history->stored_flag = false;
-  //fix_bond_history->post_neighbor();
 
   for (i = 0; i < atom->nlocal; i++) {
     for (m = 0; m < atom->num_bond[i]; m++) {
@@ -224,7 +221,10 @@ void BondBPMProny::store_data()
       bondstore[m][2] = 0;
 
       const Table *tb = &tables[tabindex[type]];
-    
+      if (r < EPSILON) {
+        error->one(FLERR, "Bond reference length too small");
+      }
+
       // Loop through all Maxwell elements and initialize variable 
       for (int n = 0; n < tb->ninput; n++ ) {
 
