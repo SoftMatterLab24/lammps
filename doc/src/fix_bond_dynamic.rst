@@ -79,9 +79,9 @@ discrete dettachement probability defined as:
 
 .. math::
 
-   \delta P_d = 1 - \exp{\left( -kd \Delta t \right) } 
+   \delta P_d = 1 - \exp{\left( -k_{d} \Delta t \right) } 
 
-where :math:`kd` is the dettachment rate, and :math:`\Delta t` is the timestep. For every 
+where :math:`k_{d}` is the dettachment rate, and :math:`\Delta t` is the timestep. For every 
 eligible bond if the probability constraint is satisfied then the bond is removed, otherwise it
 remains.
 
@@ -97,9 +97,9 @@ An eligible bond will form with a discrete attachement probability defined as:
 
 .. math::
 
-   \delta P_a = 1 - \exp{\left( -ka \Delta t \right) } 
+   \delta P_a = 1 - \exp{\left( -k_{a} \Delta t \right) } 
 
-where :math:`kd` is the dettachment rate, and :math:`\Delta t` is the timestep. If the
+where :math:`k_d` is the dettachment rate, and :math:`\Delta t` is the timestep. If the
 probability constraint is satisfied, then the bond will be formed. Note that with this
 method, each atom may be part of multiple created bonds on a given time step.
 
@@ -152,7 +152,7 @@ exceeding a critial legnth set by value *rcrit*. This process is performed
 before dettachement and attachment, such that when a bond exceeds its 
 critical length, it is immediately labeled for removal. 
 
-The *rouse* keyword can be used to modify bonds attachment rate ka by
+The *rouse* keyword can be used to modify bonds attachment rate :math:`k_{a}` by
 assuming that bonds must 'explore' their surrounding space through a
 sub-diffusive Rouse process before attaching. Thus, instead of a fixed 
 attachement rate (and thus constant probability) chains rate of attachement 
@@ -160,40 +160,40 @@ scales nonlinearly with the distance between two atoms :math:`r` according to:
 
 .. math::
 
-   k_a^{rouse} = ka \left( \frac{b0}{r} \right)^4
+   k_{a}^{rouse} = k_{a} \left( \frac{b0}{r} \right)^4
 
-where :math:`ka` is the nominal or fixed attachment rate and
+where :math:`k_{a}` is the nominal or fixed attachment rate and
 :math:`b0` is a distance. In the case of polymeric systems, assuming
 flexible ergodic chains, :math:`b0` is the molecular distance travelled
-in time :math:`1/ka`. The *rouse* keyword cannot be used with *prob*.
+in time :math:`1/k_{a}`. The *rouse* keyword cannot be used with *prob*.
 
-The *bell* keyword can be used to modify bonds dettachement rate kd
+The *bell* keyword can be used to modify bonds dettachement rate :math:`k_{a}`
 by assuming bonds dettachment kinetics is force-sensitive. In this case, bonds dettachment
 rate increases exponentially under increasing force given by Bell's model:
 
 .. math::
 
-   k_d^{bell} = kd \exp{ \left( \frac{f}{f0} \right)}
+   k_d^{bell} = k_{d} \exp{ \left( \frac{f}{f0} \right)}
 
-where :math:`kd` is the nominal or fixed dettachment rate, :math:`f` is
+where :math:`k_{d}` is the nominal or fixed dettachment rate, :math:`f` is
 the bonds force, and :math:`f0` characterizes the bonds force-sensitivity. 
 The *bell* keyword cannot be used with keyword *prob* or *catch*.
 
-The *catch* keyword can be used to modify bonds dettachement rate kd
+The *catch* keyword can be used to modify bonds dettachement rate :math:`k_{d}`
 by assuming bonds dettachment kinetics is force-sensitive. Unlike Bell's model,
 bonds dettachment rate at first decreases before subsequently increasing under
 increasing force. This is achieved with the two-pathway model:
 
 .. math::
 
-   k_d^{catch} = kd \exp{ \left( \frac{f}{fs0} \right)} +  kd kc0 \exp{ \left( \frac{-f}{fc0} \right)}
+   k_d^{catch} = k_{d} \exp{ \left( \frac{f}{fs0} \right)} +  k_{d} kc0 \exp{ \left( \frac{-f}{fc0} \right)}
 
-where :math:`kd` is the nominal or fixed dettachment rate, :math:`f` is
+where :math:`k_{d}` is the nominal or fixed dettachment rate, :math:`f` is
 the bonds force, :math:`fs0` is the force-sensitivity of the slip barrier, 
 :math:`fc0` is the force-sensitivity of the catch barrier, and :math:`kc0` is
 a scale factor that adjusts the fixed dettachment rate of the catch barrier.
 Note that when :math:`kc0` = :math:`0.0` the Bell model is recovered. Also,
-when bond forces are small (i.e 0.0) the detachment rate is :math:`kd * (1 + kc0)`.
+when bond forces are small (i.e 0.0) the detachment rate is :math:`k_{d} * (1 + kc0)`.
 The *catch* keyword cannot be used with keyword *prob* or *bell*.
 
 Any bond that is created is assigned a bond type of *bondtype*.
