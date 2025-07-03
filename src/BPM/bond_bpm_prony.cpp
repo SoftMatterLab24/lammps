@@ -263,7 +263,7 @@ void BondBPMProny::compute(int eflag, int vflag)
 
   int i1, i2, itmp, n, m, type;
   double delx, dely, delz, delvx, delvy, delvz;
-  double e, ep, rsq, r, r0, rn , r0p, rinv,  smooth, fbond, dot;
+  double e, ep, rsq, r, r0, rn , r0p, rc , rinv,  smooth, fbond, dot;
   double k_temp, eta_temp, exp_j, Hn, term1, term2, term3;
 
   ev_init(eflag, vflag);
@@ -359,7 +359,12 @@ void BondBPMProny::compute(int eflag, int vflag)
     if (normalize_flag) {
       fbond = -k0[type] * (e - ep);
     } else if (nonlinear_flag) {
-      double lam = (r - r0p) / (r0p * lamc[type] - r0p);
+      if (r > r0p) {
+        rc = r0p * lamc[type]; // if bond is in tension
+      } else {
+        rc = 0; // if bond is in compression
+      }
+      double lam = (r - r0p) / (rc - r0p);
       fbond = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
     } else {
       fbond = k0[type] * (r0p - r);
@@ -651,7 +656,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double r = sqrt(rsq);
   double rinv = 1.0 / r;
 
-  double r0, rn, r0p, ep;
+  double r0, rn, r0p, rc, ep;
   double k_temp, eta_temp, exp_j, Hn, term1, term2;
   double fel, fint;
 
@@ -703,7 +708,12 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     fel = -k0[type] * (e - ep);
     fforce += fel;
   } else if (nonlinear_flag) {
-    double lam = (r - r0p) / (r0p * lamc[type] - r0p);
+    if (r > r0p) {
+      rc = r0p * lamc[type]; // if bond is in tension
+    } else {
+      rc = 0; // if bond is in compression
+    }
+    double lam = (r - r0p) / (rc - r0p);
     fel = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
     fforce += fel;
   } else
