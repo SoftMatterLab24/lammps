@@ -370,14 +370,6 @@ void BondBPMProny::compute(int eflag, int vflag)
       fbond = k0[type] * (r0p - r);
     }
 
-
-    //printf("r %f | r0 %f | rc %f | fel %f \n",r,r0p,r0p * lamc[type],fbond);
-    // nonlinear - pade
-    //lam = r / lamc;
-    //numer = lam * (3 - (lam * lam));
-    //denom = 1 - (lam * lam);
-
-
     // rate-dependent part of bond force
     // Loop through Maxwell elements
     for (m = 0; m < tb->ninput; m++ ) {
