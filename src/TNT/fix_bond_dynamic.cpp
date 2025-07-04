@@ -273,8 +273,6 @@ void FixBondDynamic::setup(int /*vflag*/)
   for (int i = 0; i < nlocal; i++) {
     if (num_bond[i] == 0) continue;
     for (int b = 0; b < num_bond[i]; b++) {
-      //printf("Bond Type: %i\n",bond_type_raw[i][b]);
-      //printf("Bond Type: %i\n",bond_type[i][b]);
       if (bond_type[i][b] == btype) {
       fbd[i][b] = bond_atom[i][b];
       }
@@ -348,28 +346,12 @@ void FixBondDynamic::post_integrate()
       
       // Tag of current bond pair
       tagint tagj = fbd[i][b];
-
-      //printf("atom: %i, i-b type: %i\n",tag[i],bond_type[i][b]);
-      //printf("i-tagj type: %i\n",bond_type[i][tagj]);
       
       // tagj < 1 means bond is already detached or there is no bond
       if (tagj < 1) continue;
 
       // Skip bonds that dont belong to right type (test)
       if (bond_type[i][b] != btype or bond_type[i][b] == 0) continue;
-
-      // Skip bonds that don't belong to the right type (slow)
-      //for (int n = 0; n < nbondlist; n++) {
-      //  int iatom = bondlist[n][0];
-      //  int jatom = bondlist[n][1];
-
-      //  if((tag[iatom]==tag[i] and tag[jatom]==tagj) || (tag[iatom]==tagj and tag[jatom]==tag[i])) {
-      //    bondtype = bondlist[n][2];
-      //    break;
-      //  }
-      //}
-
-      //if (bondtype != btype) continue;
       
       // Local id of current bond pair
       int j = atom->map(tagj);
@@ -431,13 +413,6 @@ void FixBondDynamic::post_integrate()
         // Modify kd using two-path catch model
         // kd = slip + catch
         double kd_catch = kd*exp(fabs(bondforce)/fs0) + kd*kc0_scale*exp(-fabs(bondforce)/fc0);
-        //printf("kd_catch %4.4f\n",kd_catch);
-        //printf("fbond %4.4f\n",fbond);
-        //printf("fs0 %4.4f\n",fs0);
-        //printf("fc0 %4.4f\n",fc0);
-        //printf("kco_scale %4.4f\n",kc0_scale);
-        //printf("bond %4.4f\n",bondforce);
-        
         p_detach = 1 - exp(-kd_catch*DT_EQ);
       }
       if (flag_critical) {
