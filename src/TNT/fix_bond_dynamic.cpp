@@ -1075,6 +1075,9 @@ void FixBondDynamic::process_created(int i, int j)
 
   int nlocal = atom->nlocal;
 
+  // tally newly created bond
+  atom->nbonds += 1;
+
   // Add bonds to atom class for i and j
   if (i < nlocal) {
     if (num_bond[i] == atom->bond_per_atom)
