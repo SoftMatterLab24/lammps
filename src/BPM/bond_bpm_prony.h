@@ -37,6 +37,7 @@ class BondBPMProny : public BondBPM {
   void write_restart_settings(FILE *) override;
   void read_restart_settings(FILE *) override;
   double single(int, double, int, int, double &) override;
+  void *extract(const char *, int &) override;
   //int pack_forward_comm(int, int *, double *, int, int *) override;
   //void unpack_forward_comm(int, int, double *) override;
   //int pack_reverse_comm(int, int, double *) override;
@@ -48,8 +49,8 @@ class BondBPMProny : public BondBPM {
 
   int index_vol, index_vol0, nmax;
   char *id_fix_property_bond;
-  double *vol_current, *dvol0;
   double *len_current, **H;
+  double *aT_temp;
   double dt_temp;
 
   struct Table {

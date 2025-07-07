@@ -36,8 +36,8 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr), aT(nullptr),
-    id_fix_property_bond(nullptr)
+    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr), 
+    aT(nullptr), aT_temp(nullptr), id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
@@ -87,7 +87,7 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(lamc);
     memory->destroy(eplastic);
     memory->destroy(aT);
-    
+    memory->destroy(aT_temp);
   }
 
 }
@@ -230,7 +230,6 @@ void BondBPMProny::store_data()
       // Loop through all Maxwell elements and initialize variable 
       for (int n = 0; n < tb->ninput; n++ ) {
 
-        //printf("values %f\n",tb->kfile[n]);
         // Compute exponential terms
         k_temp = tb->kfile[n];
         eta_temp = aT[type] * tb->etafile[n];
@@ -298,9 +297,13 @@ void BondBPMProny::compute(int eflag, int vflag)
 
     const Table *tb = &tables[tabindex[type]];
 
-    // Update table (exponential constants) if the timestep has changed
+    // Update table (exponential constants)
     if (!(dt == dt_temp)) {
-      update_table(type);
+      update_table(type); // if the timestep has changed
+    }
+    
+    if (!(aT[type] == aT_temp[type])) {
+      update_table(type); // if the shift factor has changed
     }
 
     // Ensure pair is always ordered to ensure numerical operations
@@ -445,6 +448,7 @@ void BondBPMProny::allocate()
   memory->create(lamc,np1,"bond:lamc");
   memory->create(eplastic,np1,"bond:eplastic");
   memory->create(aT,np1,"bond:aT"); 
+  memory->create(aT_temp,np1,"bond:aT_temp");
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
   for (int i = 1; i < np1; i++) setflag[i] = 0;
@@ -496,6 +500,7 @@ void BondBPMProny::coeff(int narg, char **arg)
     lamc[i] = lamc_one;
     eplastic[i] = eplastic_one;
     aT[i] = aT_one;
+    aT_temp[i] = aT_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
     
@@ -605,6 +610,7 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &eplastic[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -616,6 +622,7 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&eplastic[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&aT[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&aT_temp[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
@@ -675,9 +682,6 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   for (int n = 0; n < atom->num_bond[i]; n++) {
     if (atom->bond_atom[i][n] == atom->tag[j]) {
-
-      
-      //printf("i %i | n %i \n",i,n);
 
       r0 = fix_bond_history->get_atom_value(i, n, 0);
       rn = fix_bond_history->get_atom_value(i, n, 1);
@@ -838,8 +842,9 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
     }
 
   }
-  //printf("k: %f | eta %f |\n",tb->kfile[0],tb->etafile[0]);
+
   printf("Read %i parameters from bond table\n",tb->ninput);
+
 }
 
 /* ----------------------------------------------------------------------
@@ -892,6 +897,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
       tb->expfile[m] = exp_j;
     }
   dt_temp = dt;
+  aT_temp[type] = aT[type]; 
 }
 
 /* ----------------------------------------------------------------------
@@ -919,3 +925,10 @@ void BondBPMProny::bcast_table(Table *tb) // *UPDATED
 }
 
 /* ---------------------------------------------------------------------- */
+
+void *BondBPMProny::extract(const char *str, int &dim)
+{
+  dim = 1;
+  if (strcmp(str, "aT") == 0) return (void *) aT;
+  return nullptr;
+}
