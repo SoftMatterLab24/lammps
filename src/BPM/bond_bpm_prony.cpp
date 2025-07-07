@@ -36,7 +36,7 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr),
+    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr), aT(nullptr),
     id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
@@ -44,6 +44,7 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   normalize_flag = 0;
   nonlinear_flag = 0;
   plastic_flag = 0;
+  temperature_flag = 0;
   writedata = 0;
 
   ntables = 0;
@@ -85,6 +86,7 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(gamma);
     memory->destroy(lamc);
     memory->destroy(eplastic);
+    memory->destroy(aT);
     
   }
 
@@ -130,7 +132,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
         // Compute exponential terms
         k_temp = tb->kfile[l];
-        eta_temp = tb->etafile[l];
+        eta_temp = aT[type] * tb->etafile[l];
 
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[l] = exp_j;
@@ -157,7 +159,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
 
         // Compute exponential terms
         k_temp = tb->kfile[l];
-        eta_temp = tb->etafile[l];
+        eta_temp = aT[type] * tb->etafile[l];
 
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[l] = exp_j;
@@ -231,7 +233,7 @@ void BondBPMProny::store_data()
         //printf("values %f\n",tb->kfile[n]);
         // Compute exponential terms
         k_temp = tb->kfile[n];
-        eta_temp = tb->etafile[n];
+        eta_temp = aT[type] * tb->etafile[n];
         
         exp_j = exp(-dt * k_temp / eta_temp);
         tb->expfile[n] = exp_j;
@@ -376,7 +378,7 @@ void BondBPMProny::compute(int eflag, int vflag)
 
       //Get element specific params
       k_temp = tb->kfile[m];
-      eta_temp = tb->etafile[m];
+      eta_temp = aT[type] * tb->etafile[m];
       exp_j = tb->expfile[m];
 
       // Get bond history variable
@@ -442,6 +444,7 @@ void BondBPMProny::allocate()
   memory->create(gamma, np1, "bond:gamma");
   memory->create(lamc,np1,"bond:lamc");
   memory->create(eplastic,np1,"bond:eplastic");
+  memory->create(aT,np1,"bond:aT"); 
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
   for (int i = 1; i < np1; i++) setflag[i] = 0;
@@ -454,7 +457,7 @@ void BondBPMProny::allocate()
 
 void BondBPMProny::coeff(int narg, char **arg)
 {
-  if (narg != 8) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (!(narg >= 8)) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -472,10 +475,18 @@ void BondBPMProny::coeff(int narg, char **arg)
 
   double lamc_one = utils::numeric(FLERR, arg[6], false, lmp);
   double eplastic_one = utils::numeric(FLERR, arg[7], false, lmp);
+  double aT_one = 1; 
 
   if ((nonlinear_flag) && (lamc_one <= 1)) {
     error->all(FLERR, "Incorrect bond coefficient maximum extension must be greater than one");
   }
+
+  // Parse optional remaining arguments
+  int iarg = 8;
+  if (temperature_flag) {
+    if (iarg+1 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
+    aT_one = utils::numeric(FLERR, arg[8], false, lmp);
+  } 
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -484,6 +495,7 @@ void BondBPMProny::coeff(int narg, char **arg)
     gamma[i] = gamma_one;
     lamc[i] = lamc_one;
     eplastic[i] = eplastic_one;
+    aT[i] = aT_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
     
@@ -494,7 +506,7 @@ void BondBPMProny::coeff(int narg, char **arg)
    ntables++;
 
   if (count == 0) error->all(FLERR, "Incorrect args for bond coefficients");
-
+  
 }
 
 /* ----------------------------------------------------------------------
@@ -536,6 +548,10 @@ void BondBPMProny::settings(int narg, char **arg)
     } else if (strcmp(arg[iarg], "nonlinear") == 0) {
       if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for nonlinear");
       nonlinear_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
+      i += 1;
+    } else if (strcmp(arg[iarg], "temp/shift") == 0) {
+      if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for temp/shift");
+      temperature_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
       i += 1;
     } else {
       error->all(FLERR, "Illegal bond bpm command, invalid argument {}", arg[iarg]);
@@ -588,6 +604,7 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &eplastic[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -598,6 +615,7 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&eplastic[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&aT[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
@@ -615,6 +633,7 @@ void BondBPMProny::write_restart_settings(FILE *fp)
   fwrite(&normalize_flag, sizeof(int), 1, fp);
   fwrite(&nonlinear_flag, sizeof(int), 1, fp);
   fwrite(&plastic_flag,sizeof(int), 1, fp);
+  fwrite(&temperature_flag,sizeof(int), 1, fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -628,11 +647,13 @@ void BondBPMProny::read_restart_settings(FILE *fp)
     utils::sfread(FLERR, &normalize_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &nonlinear_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &plastic_flag, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &temperature_flag, sizeof(int), 1, fp, nullptr, error);
   }
   MPI_Bcast(&smooth_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&normalize_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&nonlinear_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&plastic_flag, 1, MPI_INT, 0, world);
+  MPI_Bcast(&temperature_flag, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -667,7 +688,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
         //Get element specific params
         k_temp = tb->kfile[m];
-        eta_temp = tb->etafile[m];
+        eta_temp = aT[type] * tb->etafile[m];
         exp_j = tb->expfile[m];
 
         Hn = fix_bond_history->get_atom_value(i, n, m+3);
@@ -865,7 +886,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
     for (int m = 0; m < tb->ninput; m++ ) {
 
       k_temp = tb->kfile[m];
-      eta_temp = tb->etafile[m]; 
+      eta_temp = aT[type] * tb->etafile[m]; 
 
       exp_j = exp(-dt * k_temp / eta_temp);
       tb->expfile[m] = exp_j;
