@@ -700,18 +700,17 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
         if (normalize_flag) { 
           term1 = exp_j * Hn;
           term2 =  k_temp * ((rn - r) / r0) * (1 - exp_j) / (dt * k_temp / eta_temp);
-        } else
+        } else {
           term1 = exp_j * Hn;
           term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
-
+        }
         fforce += (term1 + term2);
 
       }
 
     }
   }
-
-  fint = fforce;
+  
   double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
   //plastic calculations
@@ -733,9 +732,15 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     double lam = (r - r0p) / (rc - r0p);
     fel = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
     fforce += fel;
-  } else
+  } else {
     fel = k0[type] * (r0p - r);
     fforce += fel;
+  }
+
+  fint = fforce - fel;
+  //if (i == 1) {
+  //  printf("fforce %f \n",fforce);
+  //}
 
   double **x = atom->x;
   double **v = atom->v;
