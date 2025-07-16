@@ -42,6 +42,9 @@ Syntax
        *nonlinear* value = *yes* or *no*
           indicates whether nonlinear option is used
 
+       *temp/shift* value = *yes* or *no*
+          indicates whether the shift factor is used
+
 
 Examples
 """"""""
@@ -49,11 +52,11 @@ Examples
 .. code-block:: LAMMPS
 
    bond_style bpm/prony 1
-   bond_coeff 1 1.0 0.4 0.1 file.table keyword 1.0 1.0
+   bond_coeff 1 1.0 0.4 0.1 file.table keyword 1.0 1.0 0.0
 
    bond_style bpm/prony 1 plastic yes nonlinear yes
-   bond_coeff 1 1.0 0.4 0.1 file1.table keyword 1.0 1.0
-   bond_coeff 2 5.0 0.6 0.1 file2.table keyword 0.2 2.0
+   bond_coeff 1 1.0 0.4 0.1 file1.table keyword 1.0 1.0 0.0
+   bond_coeff 2 5.0 0.6 0.1 file2.table keyword 0.2 2.0 0.0
 
    bond_style bpm/prony 1 myfix 1000 time id1 id2
    dump 1 all local 1000 dump.broken f_myfix[1] f_myfix[2] f_myfix[3]
@@ -171,30 +174,46 @@ the force in the elastic element will initially grow elastically before plateaui
 *plastic no* can be achieved by setting an arbitrarily high value of :math:`\epsilon_p`, or a higher value
 than :math:`\epsilon_c` if the *break yes* option is enabled.
 
-The *nonlinear* keyword toggles whether the force in the elastic element is nonlinear. 
+The *nonlinear* keyword toggles whether the force in the elastic element is nonlinear. The form
+of this is chosen such that the stiffness is :math:`k_{0}` for small applied strains, and diverges as
+bonds approach a critcal stretch :math:`\lambda_{c}`.
 If set to *yes* the elastic force has a magnitude of
 
 .. math::
-   F_{E} = k_0 (r - r_0)^{\alpha}
+   F_{E} = k_0 (r - r_0)\bigl[ \frac{1}{1-\lambda^{2}} \bigr]
 
-where :math:`\alpha` is an exponent chosen to model an arbitrary nonlinear response.
-Note that the units of :math:`k_0` will depend on :math:`\alpha` in order for the
-force units to be consistent. Similar behaviour to *nonlinear no* can be achived by setting
-:math:`\alpha` equal to unity. If additionally, *plastic* = *yes* the reference state :math:`r_0`
+where :math:`\lambda = (r - r_{0})/(r_{c}-r_{0})` is the stretch ratio with
+:math:`r_{0}` the reference bond length. The critical length :math:`r_{c}` in tension 
+is simply :math:`\lambda_c r_{0}`, meanwhile in compression :math:`r_{c}` = :math:`0`.
+If additionally, *plastic* = *yes* the reference state :math:`r_0`
 is replaced by the equlibrium state :math:`r_{eq}` as outlined above.
+
+The *temp/shift* keyword toggles whether the shift factor is used. This multiplicatively 
+adjusts the viscoelastic timescale as
+
+.. math::
+   eta_m = a_T eta^0_m
+
+where :math:`eta_m^0` are the viscosities of the Maxwell elements as specified in 
+the tabulated file, and :math:`eta_m` are the shifted viscosities used during a simulation.
+This can be used to essentially freeze relaxation of the internal stress during loading for
+instance. Alternatively, the shift factor :math:`a_T` is accessible by the
+:doc:`fix_adapt <fix adapt>` command which allows :math:`a_T` to be modified continuously
+during a simulation.
 
 The following coefficients must be defined for each bond type via the
 :doc:`bond_coeff <bond_coeff>` command as in the example above, or in
 the data file or restart files read by the :doc:`read_data
 <read_data>` or :doc:`read_restart <read_restart>` commands:
 
-* :math:`k_0`             (force/distance units)
+* :math:`k_0`            (force/distance units)
 * :math:`\epsilon_c`     (unitless)
 * :math:`\gamma`         (force/velocity units)
 * filename
 * keyword
 * :math:`\epsilon_p`      (unitless)
-* :math:`\alpha`          (unitless)
+* :math:`\lambda_c`       (unitless)
+* :math:`a_T`             (unitless)
 
 The filename specifies a file containing the tablulated coefficients for the Maxwell 
 elements. The keyword specifies a section of the file. The format of this file is described below.
@@ -320,7 +339,7 @@ Related commands
 Default
 """""""
 
-The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, *plastic* = *no*, and *nonlinear* = *no*
+The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, *plastic* = *no*, *nonlinear* = *no*, and *temp/shift* = *no*
 
 ----------
 
