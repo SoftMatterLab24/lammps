@@ -43,7 +43,7 @@ Syntax
           indicates whether nonlinear option is used
 
        *temp/shift* value = *yes* or *no*
-          indicates whether the shift factor is used
+          indicates whether the viscous elements are multiplicatively shifted
 
 
 Examples
