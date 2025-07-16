@@ -10,7 +10,7 @@ Syntax
 
    bond_style bpm/prony N keyword value attribute1 attribute2 ...
 * N = allocate history variables for N Mawell elements
-* optional keyword =  *store/local* or *overlay/pair* or *smooth* or *normalize* or *break* or *plastic* or *nonlinear*
+* optional keyword =  *store/local* or *overlay/pair* or *smooth* or *normalize* or *break* or *plastic* or *nonlinear* or *temp/shift*
 
   .. parsed-literal::
 
