@@ -16,6 +16,7 @@ Syntax
 * bondtype = type of bond modified by this fix
 * ka = attachment rate
 * kd = dettachment rate
+* either ka, kd can be a variable (see below)
 * Rcut = two atoms separated by less than Rcut can attach or dettach (distance units)
 * zero or more keyword/value pairs may be appended to args
 * keyword = *maxbond* or *seed* or *prob* or *mol* or *critical* or *rouse* or *bell* or *catch*
@@ -52,7 +53,7 @@ Examples
    fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7
    fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7 maxbond 8 prob 0.5 0.7 
    fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7 maxbond 8 critical 1.5
-   fix 5 all bond/dynamic 1 2 2 1 10 0.1 1.7 maxbond 8 critical 1.5 rouse 0.5 catch 2 2 1
+   fix 5 all bond/dynamic 1 2 2 1 v_ka v_kd 1.7 maxbond 8 critical 1.5 rouse 0.5 catch 2 2 1
 
 
 Description
@@ -99,9 +100,15 @@ An eligible bond will form with a discrete attachement probability defined as:
 
    \delta P_a = 1 - \exp{\left( -k_{a} \Delta t \right) } 
 
-where :math:`k_d` is the dettachment rate, and :math:`\Delta t` is the timestep. If the
+where :math:`k_a` is the attachment rate, and :math:`\Delta t` is the timestep. If the
 probability constraint is satisfied, then the bond will be formed. Note that with this
 method, each atom may be part of multiple created bonds on a given time step.
+
+Either of the 2 quantities defining the rates can be specified as an equal-style 
+:doc:`variable <variable>`, namely *ka*, *kd*. If the value is a variable, it should
+be specified as v_name, where name is the variable name. In this case, the variable
+will be evaluated each timestep, and its value used to determine the attachment
+and dettachment rates respectively.
 
 It is permissible to have *itype* = *jtype*\ .  *Rcut* must be :math:`\leq` the
 pair-wise cutoff distance between *itype* and *jtype* atoms, as defined
