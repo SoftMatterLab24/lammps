@@ -671,8 +671,10 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   const Table *tb = &tables[tabindex[type]];
   double dt = update->dt;
+  int **bondlist = neighbor->bondlist;
+  int nbondlist = neighbor->nbondlist;
   double **bondstore = fix_bond_history->bondstore;
-
+  
   double r = sqrt(rsq);
   double rinv = 1.0 / r;
 
@@ -680,22 +682,33 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double k_temp, eta_temp, exp_j, Hn, term1, term2;
   double fel, fint;
 
-  for (int n = 0; n < atom->num_bond[i]; n++) {
-    if (atom->bond_atom[i][n] == atom->tag[j]) {
+  // rn, ep, hn can be updated, so search bondlist vs. fix_bond_history->get_atom_value()
+  tagint tagi = tag[i];
+  tagint tagj = tag[j];
+  tagint tag1, tag2;
 
-      r0 = fix_bond_history->get_atom_value(i, n, 0);
-      rn = fix_bond_history->get_atom_value(i, n, 1);
-      ep = fix_bond_history->get_atom_value(i, n, 2);
-
-      // Loop through Maxwell elements (rate-dependent)
-      for (int m = 0; m < tb->ninput; m++ ) {
+  int n
+  for (n = 0; n < nbondlist; n++) {
+     tag1 = tag[bondlist[n][0]];
+     tag2 = tag[bondlist[n][1]];
+     if ((tag1 == tagi && tag2 == tagj) || (tag1 == tagj && tag2 == tagi))
+        break;
+  }
+   
+  r0 = bondstore[n][0];
+  rn = bondstore[n][1];
+  ep = bondstore[n][2];
+   
+     double fforce = 0;
+     // Loop through Maxwell elements (rate-dependent)
+     for (int m = 0; m < tb->ninput; m++ ) {
 
         //Get element specific params
         k_temp = tb->kfile[m];
         eta_temp = aT[type] * tb->etafile[m];
         exp_j = tb->expfile[m];
 
-        Hn = fix_bond_history->get_atom_value(i, n, m+3);
+        Hn = bondstore[n][m+3];
 
         if (normalize_flag) { 
           term1 = exp_j * Hn;
@@ -738,9 +751,6 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   }
 
   fint = fforce - fel;
-  //if (i == 1) {
-  //  printf("fforce %f \n",fforce);
-  //}
 
   double **x = atom->x;
   double **v = atom->v;
@@ -778,7 +788,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     read from table file
  ------------------------------------------------------------------------- */
 
-void BondBPMProny::null_table(Table *tb) // *UPDATED
+void BondBPMProny::null_table(Table *tb)
 {
   tb->kfile = tb->etafile = tb->expfile = nullptr;
   tb->k = tb->eta = tb->expj = nullptr;
@@ -787,7 +797,7 @@ void BondBPMProny::null_table(Table *tb) // *UPDATED
 
 /* ---------------------------------------------------------------------- */
 
-void BondBPMProny::free_table(Table *tb) // *UPDATED
+void BondBPMProny::free_table(Table *tb)
 {
   memory->destroy(tb->kfile);
   memory->destroy(tb->etafile);
@@ -803,7 +813,7 @@ void BondBPMProny::free_table(Table *tb) // *UPDATED
    read table file, only called by proc 0
 ------------------------------------------------------------------------- */
 
-void BondBPMProny::read_table(Table *tb, char *file, char *keyword) // *UPDATED
+void BondBPMProny::read_table(Table *tb, char *file, char *keyword)
 {
   double dt = update->dt;
   
