@@ -671,6 +671,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
   const Table *tb = &tables[tabindex[type]];
   double dt = update->dt;
+  tagint *tag = atom->tag;
   int **bondlist = neighbor->bondlist;
   int nbondlist = neighbor->nbondlist;
   double **bondstore = fix_bond_history->bondstore;
@@ -687,41 +688,38 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   tagint tagj = tag[j];
   tagint tag1, tag2;
 
-  int n
+  int n;
   for (n = 0; n < nbondlist; n++) {
-     tag1 = tag[bondlist[n][0]];
-     tag2 = tag[bondlist[n][1]];
-     if ((tag1 == tagi && tag2 == tagj) || (tag1 == tagj && tag2 == tagi))
-        break;
+    tag1 = tag[bondlist[n][0]];
+    tag2 = tag[bondlist[n][1]];
+    if ((tag1 == tagi && tag2 == tagj) || (tag1 == tagj && tag2 == tagi))
+      break;
   }
    
   r0 = bondstore[n][0];
   rn = bondstore[n][1];
   ep = bondstore[n][2];
    
-     double fforce = 0;
-     // Loop through Maxwell elements (rate-dependent)
-     for (int m = 0; m < tb->ninput; m++ ) {
+  fforce = 0;
+  // Loop through Maxwell elements (rate-dependent)
+  for (int m = 0; m < tb->ninput; m++ ) {
 
-        //Get element specific params
-        k_temp = tb->kfile[m];
-        eta_temp = aT[type] * tb->etafile[m];
-        exp_j = tb->expfile[m];
+    //Get element specific params
+    k_temp = tb->kfile[m];
+    eta_temp = aT[type] * tb->etafile[m];
+    exp_j = tb->expfile[m];
 
-        Hn = bondstore[n][m+3];
+    Hn = bondstore[n][m+3];
 
-        if (normalize_flag) { 
-          term1 = exp_j * Hn;
-          term2 =  k_temp * ((rn - r) / r0) * (1 - exp_j) / (dt * k_temp / eta_temp);
-        } else {
-          term1 = exp_j * Hn;
-          term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
-        }
-        fforce += (term1 + term2);
-
-      }
-
+    if (normalize_flag) { 
+      term1 = exp_j * Hn;
+      term2 =  k_temp * ((rn - r) / r0) * (1 - exp_j) / (dt * k_temp / eta_temp);
+    } else {
+      term1 = exp_j * Hn;
+      term2 =  k_temp * (rn - r) * (1 - exp_j) / (dt * k_temp / eta_temp);
     }
+
+    fforce += (term1 + term2);
   }
   
   double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
