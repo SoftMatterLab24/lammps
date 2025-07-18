@@ -83,7 +83,6 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
     kd = utils::numeric(FLERR, arg[8], false, lmp);
     kd_style = CONSTANT;
   }
-
   double cutoff = utils::numeric(FLERR,arg[9],false,lmp);
 
   if (btype < 1 || btype > atom->nbondtypes)
@@ -378,7 +377,7 @@ void FixBondDynamic::post_integrate()
   } else if (kd_style == CONSTANT) {
 
   }
-  printf("Rates ka %f | kd %f |\n",ka,kd);
+  //printf("Rates ka %f | kd %f |\n",ka,kd);
   // JTC: Probably not worth worrying about, but this definition of DT_EQ won't be
   // compatible with a variable timestep like that used in fix dt/reset.
   // Not sure there's a great solution (maybe incrementing?) or a good error check
