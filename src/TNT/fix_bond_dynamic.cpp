@@ -31,6 +31,8 @@
 #include "update.h"
 #include <iostream>
 #include "fix_bond_history.h"
+#include "input.h"
+#include "variable.h"
 
 #include <cstring>
 #include "math_const.h"
@@ -39,13 +41,16 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
+enum {CONSTANT, EQUAL};
+
 /* ---------------------------------------------------------------------- */
 
 FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
   distsq(nullptr), probabilities(nullptr), list(nullptr),
   random(nullptr), partners_possible_f(nullptr), partners_probs_f(nullptr),
-  partners_possible(nullptr), partners_probs(nullptr), npos(nullptr), partners_success(nullptr)
+  partners_possible(nullptr), partners_probs(nullptr), npos(nullptr), partners_success(nullptr),
+  ka_str(nullptr), kd_str(nullptr)
 {
   if (narg < 9) error->all(FLERR,"Illegal fix bond/dynamic command");
 
@@ -62,8 +67,23 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   iatomtype = utils::inumeric(FLERR,arg[4],false,lmp);
   jatomtype = utils::inumeric(FLERR,arg[5],false,lmp);
   btype = utils::inumeric(FLERR,arg[6],false,lmp);
-  ka = utils::numeric(FLERR,arg[7],false,lmp);
-  kd = utils::numeric(FLERR,arg[8],false,lmp);
+
+  // see if ka and kd are variables or constants
+  if (utils::strmatch(arg[7], "^v_")) {
+    ka_str = utils::strdup(arg[7] + 2);
+    ka_style = EQUAL;
+  } else {
+    ka = utils::numeric(FLERR, arg[7], false, lmp);
+    ka_style = CONSTANT;
+  }
+  if (utils::strmatch(arg[8], "^v_")) {
+    kd_str = utils::strdup(arg[8] + 2);
+    kd_style = EQUAL;
+  } else {
+    kd = utils::numeric(FLERR, arg[8], false, lmp);
+    kd_style = CONSTANT;
+  }
+
   double cutoff = utils::numeric(FLERR,arg[9],false,lmp);
 
   if (btype < 1 || btype > atom->nbondtypes)
@@ -181,6 +201,7 @@ FixBondDynamic::~FixBondDynamic()
 
   if (new_fix_id && modify->nfix) modify->delete_fix(new_fix_id);
   delete [] new_fix_id;
+  delete [] ka_str;
 
 }
 
@@ -235,6 +256,24 @@ void FixBondDynamic::init()
   // find instances of bond history to delete/shift data
   histories = modify->get_fix_by_style("BOND_HISTORY");
   n_histories = histories.size();
+
+  // check variables
+  if (ka_str) {
+    ka_var = input->variable->find(ka_str);
+    if (ka_var < 0) error->all(FLERR, "Variable {} for fix bond/dynamic does not exist", ka_str);
+    if (input->variable->equalstyle(ka_var))
+      ka_style = EQUAL;
+    else
+      error->all(FLERR, "Variable {} for fix bond/dynamic is invalid style", ka_str);
+  }
+  if (kd_str) {
+    kd_var = input->variable->find(kd_str);
+    if (kd_var < 0) error->all(FLERR, "Variable {} for fix bond/dynamic does not exist", kd_str);
+    if (input->variable->equalstyle(kd_var))
+      kd_style = EQUAL;
+    else
+      error->all(FLERR, "Variable {} for fix bond/dynamic is invalid style", kd_str);
+  }
 
 }
 
@@ -327,6 +366,19 @@ void FixBondDynamic::post_integrate()
   int *type = atom->type;
   Bond *bond = force->bond;
   double DT_EQ = (update->dt)*nevery;
+
+  // Need to grab correct rates
+  if (ka_style == EQUAL) {
+    ka = input->variable->compute_equal(ka_var);
+  } else if (ka_style == CONSTANT) {
+
+  }
+  if (kd_style == EQUAL) {
+    kd = input->variable->compute_equal(kd_var);
+  } else if (kd_style == CONSTANT) {
+
+  }
+  printf("Rates ka %f | kd %f |\n",ka,kd);
   // JTC: Probably not worth worrying about, but this definition of DT_EQ won't be
   // compatible with a variable timestep like that used in fix dt/reset.
   // Not sure there's a great solution (maybe incrementing?) or a good error check

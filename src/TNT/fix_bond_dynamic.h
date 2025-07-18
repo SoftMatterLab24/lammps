@@ -44,6 +44,8 @@ class FixBondDynamic : public Fix {
 
   // Default arguments
   int nevery,iatomtype,jatomtype,btype;
+  char *ka_str, *kd_str;
+  int ka_var, ka_style, kd_var, kd_style;
   double ka,kd,cutsq;
 
   // Seed for random numbers
