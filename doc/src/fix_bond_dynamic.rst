@@ -214,7 +214,7 @@ This is acchieved with the Ellis model:
 
 .. math::
 
-   k_d^{ellis} = k_{d} + \frac{k_{d,max}-k_{d}}{1+\exp{-\alpha(f-f_y)}}
+   k_d^{ellis} = k_{d} + \frac{k_{d,max}-k_{d}}{1+\exp{[-\alpha(f-f_y)]}}
 
 where :math:`f` is the bonds force, :math:`f_y` is the yield force at which 
 :math:`k_d` begins to transition, and :math:`\alpha` is a factor related to
