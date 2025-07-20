@@ -19,7 +19,7 @@ Syntax
 * either ka, kd can be a variable (see below)
 * Rcut = two atoms separated by less than Rcut can attach or dettach (distance units)
 * zero or more keyword/value pairs may be appended to args
-* keyword = *maxbond* or *seed* or *prob* or *mol* or *critical* or *rouse* or *bell* or *catch*
+* keyword = *maxbond* or *seed* or *prob* or *mol* or *critical* or *rouse* or *bell* or *catch* or *ellis*
 
   .. parsed-literal::
 
@@ -44,6 +44,10 @@ Syntax
          fs0 = force-sensitivity of the bonds slip barrier (force units)
          fc0 = force-sensitivity of the bonds catch barrier (force units)
          kc0 = scale factor for bonds catch barrier (unitless)
+       *ellis* values kdmax fy alph
+         kdmax = maximum dissociation rate (inverse time units)
+         fy = yield force at which dissociation rate begins to transition (force units)
+         alph = governs the width of the transition region (unitless)
 
 Examples
 """"""""
@@ -142,7 +146,7 @@ number between 0.0 and 1.0 is generated and the eligible bond
 is only created if the random number is less than *Pattach*. Likewise,
 for bond deletion a uniform random  number between 0.0 and 1.0 is generated 
 and the eligible bond  is only removed if the random number is less than *Pdettach*.
-The *prob* keyword cannot be used with keyword *rouse* or *bell* or *catch*.
+The *prob* keyword cannot be used with keyword *rouse* or *bell* or *catch* or *ellis*.
 
 The *mol* keyword can be used to limit the bonding functionality of
 the participating atoms. If the value of *mol* is 1, then in addition 
@@ -184,7 +188,7 @@ rate increases exponentially under increasing force given by Bell's model:
 
 where :math:`k_{d}` is the nominal or fixed dettachment rate, :math:`f` is
 the bonds force, and :math:`f0` characterizes the bonds force-sensitivity. 
-The *bell* keyword cannot be used with keyword *prob* or *catch*.
+The *bell* keyword cannot be used with keyword *prob* or *catch* or *ellis*.
 
 The *catch* keyword can be used to modify bonds dettachement rate :math:`k_{d}`
 by assuming bonds dettachment kinetics is force-sensitive. Unlike Bell's model,
@@ -201,7 +205,21 @@ the bonds force, :math:`fs0` is the force-sensitivity of the slip barrier,
 a scale factor that adjusts the fixed dettachment rate of the catch barrier.
 Note that when :math:`kc0` = :math:`0.0` the Bell model is recovered. Also,
 when bond forces are small (i.e 0.0) the detachment rate is :math:`k_{d} * (1 + kc0)`.
-The *catch* keyword cannot be used with keyword *prob* or *bell*.
+The *catch* keyword cannot be used with keyword *prob* or *bell* or *ellis.
+
+The *ellis* keyword can be used to modify bonds dettachement rate 
+by assuming that bonds exchange rate is bounded by an equilibrium rate :math:`k_{d}` at
+low force and a maximum or accelerated dettachment rate :math:`k_{d,max}` at high force. 
+This is acchieved with the Ellis model:
+
+.. math::
+
+   k_d^{ellis} = k_{d} + \frac{k_{d,max}-k_{d}}{1+\exp{-\alpha(f-f_y)}}
+
+where :math:`f` is the bonds force, :math:`f_y` is the yield force at which 
+:math:`k_d` begins to transition, and :math:`\alpha` is a factor related to
+the width of the transition region. The *ellis* keyword cannot be used with the
+keyword *prob* or *bell* or *catch*
 
 Any bond that is created is assigned a bond type of *bondtype*.
 
