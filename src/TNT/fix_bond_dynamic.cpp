@@ -169,6 +169,8 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
     error->all(FLERR,"Cannot use argument prob with argument bell");
   if (flag_prob && flag_catch)
     error->all(FLERR,"Cannot use argument prob with argument catch");
+  if (flag_prob && flag_ellis)
+    error->all(FLERR,"Cannot use argument prob with argument ellis");
   if (flag_bell && flag_catch)
     error->all(FLERR,"Cannot use argument bell with argument catch");
   if (flag_bell && flag_ellis)
