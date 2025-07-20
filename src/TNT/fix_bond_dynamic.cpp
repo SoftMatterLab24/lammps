@@ -99,6 +99,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   flag_prob = 0;
   flag_bell = 0;
   flag_catch = 0;
+  flag_ellis = 0;
   flag_rouse = 0;
   flag_critical = 0;
   flag_mol = 0;
@@ -132,6 +133,13 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
       kc0_scale = utils::numeric(FLERR,arg[iarg+3],false,lmp);
       flag_catch = 1;
       iarg += 4;
+    } else if (strcmp(arg[iarg],"ellis") == 0) {
+      if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
+      kd_max = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+      fbond_y = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+      alph = utils::numeric(FLERR,arg[iarg+3],false,lmp);
+      flag_ellis = 1;
+      iarg += 4;
     } else if (strcmp(arg[iarg],"rouse") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
       double b0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
@@ -163,6 +171,10 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
     error->all(FLERR,"Cannot use argument prob with argument catch");
   if (flag_bell && flag_catch)
     error->all(FLERR,"Cannot use argument bell with argument catch");
+  if (flag_bell && flag_ellis)
+    error->all(FLERR,"Cannot use argument bell with argument ellis");
+  if (flag_ellis && flag_catch)
+    error->all(FLERR,"Cannot use argument ellis with argument catch");
   if (atom->molecular != Atom::MOLECULAR)
     error->all(FLERR,"Cannot use fix bond/dynamic with non-molecular systems");
   if (atom->bond_per_atom < maxbond)
@@ -448,7 +460,7 @@ void FixBondDynamic::post_integrate()
       }
       if (flag_catch) {
 
-         // Find distance between two atoms
+        // Find distance between two atoms
         double delx = x[i][0] - x[j][0];
         double dely = x[i][1] - x[j][1];
         double delz = x[i][2] - x[j][2];
@@ -465,6 +477,26 @@ void FixBondDynamic::post_integrate()
         // kd = slip + catch
         double kd_catch = kd*exp(fabs(bondforce)/fs0) + kd*kc0_scale*exp(-fabs(bondforce)/fc0);
         p_detach = 1 - exp(-kd_catch*DT_EQ);
+      }
+      if (flag_ellis) {
+        // Find distance between two atoms
+        double delx = x[i][0] - x[j][0];
+        double dely = x[i][1] - x[j][1];
+        double delz = x[i][2] - x[j][2];
+        domain->minimum_image(delx, dely, delz);
+        double rsq = delx*delx + dely*dely + delz*delz;
+
+        // Find force in bond
+        double fbond; // fbond is returned as f/r
+        double engpot = bond->single(btype,rsq,i,j,fbond);
+        double r = sqrt(rsq);
+        double bondforce = fabs(fbond)*r; 
+
+        // Modify kd using ellis model
+        double numer = kd_max - kd;
+        double denom = 1 + exp(-alph*(bondforce-fbond_y));
+        double kd_ellis = kd + numer / denom;
+        p_detach = 1 - exp(-kd_ellis*DT_EQ);
       }
       if (flag_critical) {
 

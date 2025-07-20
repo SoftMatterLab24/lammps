@@ -55,7 +55,7 @@ class FixBondDynamic : public Fix {
   int maxbond;
 
   // Flags for keywords
-  int flag_bell, flag_catch, flag_prob, flag_rouse, flag_critical, flag_mol;
+  int flag_bell, flag_catch, flag_ellis, flag_prob, flag_rouse, flag_critical, flag_mol;
 
   // Explicit probabilities for flag_prob
   double prob_attach, prob_detach;
@@ -65,6 +65,9 @@ class FixBondDynamic : public Fix {
 
   // Force sensitivities for flag_catch
   double fs0, fc0, kc0_scale;
+
+  // Parameters for flag_ellis
+  double kd_max, fbond_y, alph;
 
   // Lengthscale for flag_rouse
   double b2;
