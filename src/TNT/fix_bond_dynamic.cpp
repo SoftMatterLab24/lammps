@@ -63,6 +63,10 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   dynamic_group_allow = 1;
   force_reneighbor = 1;
   next_reneighbor = -1;
+  vector_flag = 1;
+  size_vector = 3;
+  global_freq = 1;
+  extvector = 1;
 
   iatomtype = utils::inumeric(FLERR,arg[4],false,lmp);
   jatomtype = utils::inumeric(FLERR,arg[5],false,lmp);
@@ -195,6 +199,12 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   partners_success = nullptr;
 
   comm_forward = 1+atom->maxspecial;
+
+  N[0] = N[1] = N[2] = 0.0;
+  ncreated = 0;
+  nremoved = 0;
+  nbroken = 0;
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -366,8 +376,9 @@ void FixBondDynamic::post_integrate()
   int bondtype = 0;
   int possible;
 
-  if (update->ntimestep % nevery) return;
 
+  if (update->ntimestep % nevery) return;
+  
   // acquire updated ghost atom positions
   // necessary b/c are calling this after integrate, but before Verlet comm
   comm->forward_comm();
@@ -541,6 +552,14 @@ void FixBondDynamic::post_integrate()
           }
         }
       }
+
+      // Finally update tallies
+      if (icritical) {
+        nbroken += 1;
+      } else {
+        nremoved += 1;
+      }
+      
     }
   }
 
@@ -1004,13 +1023,20 @@ void FixBondDynamic::post_integrate()
 
   // trigger reneighboring
   next_reneighbor = update->ntimestep;
+
+  N[0] = 2*ncreated;
+  N[1] = 2*nremoved;
+  N[2] = 2*nbroken;
+
+  if (N[0] > 0) printf("n bonds created %f \n",N[0]);
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixBondDynamic::process_broken(int i, int j)
 {
-// First add the pair to new_broken_pairs
+  
+  // Then add the pair to new_broken_pairs
   auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
   new_broken_pairs.push_back(tag_pair);
 
@@ -1135,8 +1161,9 @@ void FixBondDynamic::process_created(int i, int j)
 
   int nlocal = atom->nlocal;
 
-  // tally newly created bond
+  // Then tally newly created bond
   atom->nbonds += 1;
+  ncreated +=1;
 
   // Add bonds to atom class for i and j
   if (i < nlocal) {
@@ -1424,3 +1451,17 @@ double FixBondDynamic::memory_usage()
   bytes += (double)nmax*4 * sizeof(int);
   return bytes;
 }
+
+/* ---------------------------------------------------------------------- */
+
+double FixBondDynamic::compute_vector(int n)
+{
+
+
+  MPI_Allreduce(N, N_all, 3, MPI_DOUBLE, MPI_SUM, world);
+  //printf("ncreated %f \n",N[1]);
+
+  return N_all[n];
+
+}
+ 

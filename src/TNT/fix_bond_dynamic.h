@@ -38,6 +38,7 @@ class FixBondDynamic : public Fix {
   int pack_forward_comm(int, int *, double *, int, int *) override;
   void unpack_forward_comm(int, int, double *) override;
   double memory_usage() override;
+  double compute_vector(int) override;
 
  protected:
   int me, nprocs;
@@ -95,6 +96,8 @@ class FixBondDynamic : public Fix {
   tagint **partners_possible, **partners_possible_f;
   int *npos;
   int **partners_success;
+  double ncreated, nremoved, nbroken;
+  double N[3], N_all[3];
 
   // Character array for id of fix property/atom
   char *new_fix_id;
