@@ -46,6 +46,7 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   plastic_flag = 0;
   temperature_flag = 0;
   writedata = 0;
+  nonlinear_langevin_flag = 0;
 
   ntables = 0;
   tables = nullptr;
@@ -117,6 +118,10 @@ double BondBPMProny::store_bond(int n, int i, int j)
   bondstore[n][0] = r;
   bondstore[n][1] = r;
   bondstore[n][2] = 0;
+
+  if (nonlinear_langevin_flag) {
+    bondstore[n][0] = 0;
+  }
   
 
   if (i < atom->nlocal) {
@@ -125,6 +130,10 @@ double BondBPMProny::store_bond(int n, int i, int j)
         fix_bond_history->update_atom_value(i, m, 0, r); // r0
         fix_bond_history->update_atom_value(i, m, 1, r); // rn
         fix_bond_history->update_atom_value(i, m, 2, 0); // ep
+
+        if (nonlinear_langevin_flag) {
+          fix_bond_history->update_atom_value(i, m, 0, 0); // r0
+        }
         
         type = bond_type[i][m];
         const Table *tb = &tables[tabindex[type]];
@@ -152,6 +161,10 @@ double BondBPMProny::store_bond(int n, int i, int j)
         fix_bond_history->update_atom_value(j, m, 0, r); //r0
         fix_bond_history->update_atom_value(j, m, 1, r); //rn
         fix_bond_history->update_atom_value(j, m, 2, 0); //ep
+
+        if (nonlinear_langevin_flag) {
+          fix_bond_history->update_atom_value(j, m, 0, 0); // r0
+        }
 
         type = bond_type[j][m];
         const Table *tb = &tables[tabindex[type]];
@@ -222,6 +235,11 @@ void BondBPMProny::store_data()
       bondstore[m][1] = r;
       bondstore[m][2] = 0;
 
+      if (nonlinear_langevin_flag) {
+        fix_bond_history->update_atom_value(i, m, 0, 0);
+        bondstore[m][0] = 0;
+      }
+
       const Table *tb = &tables[tabindex[type]];
       if (r < EPSILON) {
         error->one(FLERR, "Bond reference length too small");
@@ -266,6 +284,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, r0, rn , r0p, rc , rinv,  smooth, fbond, dot;
   double k_temp, eta_temp, exp_j, Hn, term1, term2, term3;
+  double Nb, numer, denom;
 
   ev_init(eflag, vflag);
 
@@ -375,6 +394,15 @@ void BondBPMProny::compute(int eflag, int vflag)
       fbond = k0[type] * (r0p - r);
     }
 
+    if (nonlinear_langevin_flag) {
+      Nb = N[type] * b[type]; 
+      double lam = r/Nb;
+
+      numer = lam*(3.0 - pow(lam,2.0));
+      denom = 1.0 - pow(lam,2.0);
+      fbond = -k0[type]*numer/denom/b[type];
+    }
+
     // rate-dependent part of bond force
     // Loop through Maxwell elements
     for (m = 0; m < tb->ninput; m++ ) {
@@ -451,6 +479,9 @@ void BondBPMProny::allocate()
   memory->create(aT_temp,np1,"bond:aT_temp");
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
+
+  memory->create(N,np1,"bond:N");
+  memory->create(b,np1,"bond:b");
   for (int i = 1; i < np1; i++) setflag[i] = 0;
 
 }
@@ -490,7 +521,19 @@ void BondBPMProny::coeff(int narg, char **arg)
   if (temperature_flag) {
     if (iarg+1 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
     aT_one = utils::numeric(FLERR, arg[8], false, lmp);
+    iarg += 1;
   } 
+
+  // optional for 
+  while (iarg < narg) {
+    if (strcmp(arg[iarg],"nonlinear/langevin") == 0) {
+        if (iarg+3 > narg) error->all(FLERR,"Illegal fix bond/bpm/prony command");
+        double N_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
+        double b_one = utils::numeric(FLERR, arg[iarg+2], false, lmp);
+        iarg += 3;
+    }
+  }
+
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
@@ -503,6 +546,9 @@ void BondBPMProny::coeff(int narg, char **arg)
     aT_temp[i] = aT_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
+
+    N[i] = N_one;
+    b[i] = b_one;
     
     count++;
 
@@ -572,6 +618,17 @@ void BondBPMProny::settings(int narg, char **arg)
   if (nonlinear_flag && !break_flag)
     error->all(FLERR, "Illegal bond bpm command, must turn on breaking with nonlinear yes option");
 
+  if (nonlinear_langevin_flag && nonlinear_flag)
+    error->all(FLERR, "Illegal bond bpm command, must turn off nonlinear with nonlinear/langevin yes option");
+
+  if (nonlinear_langevin_flag && !break_flag)
+    error->all(FLERR, "Illegal bond bpm command, must turn on breaking with nonlinear/langevin yes option");   
+
+  if (nonlinear_langevin_flag && normalize_flag)
+    error->all(FLERR, "Illegal bond bpm command, must turn off normalize with nonlinear/langevin yes option");   
+  
+  if (nonlinear_langevin_flag && plastic_flag)
+    error->all(FLERR, "Illegal bond bpm command, must turn off plastic with nonlinear/langevin yes option");  
 }
 
 /* ----------------------------------------------------------------------
@@ -614,6 +671,9 @@ void BondBPMProny::read_restart(FILE *fp)
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
+    
+    utils::sfread(FLERR, &N[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &b[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
   }
 
   MPI_Bcast(&k0[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
@@ -626,6 +686,9 @@ void BondBPMProny::read_restart(FILE *fp)
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
+
+  MPI_Bcast(&N[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&b[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   for (int i = 1; i <= atom->nbondtypes; i++) setflag[i] = 1;
 }
@@ -641,6 +704,7 @@ void BondBPMProny::write_restart_settings(FILE *fp)
   fwrite(&nonlinear_flag, sizeof(int), 1, fp);
   fwrite(&plastic_flag,sizeof(int), 1, fp);
   fwrite(&temperature_flag,sizeof(int), 1, fp);
+  fwrite(&nonlinear_langevin_flag,sizeof(int), 1, fp);
 }
 
 /* ----------------------------------------------------------------------
@@ -655,12 +719,14 @@ void BondBPMProny::read_restart_settings(FILE *fp)
     utils::sfread(FLERR, &nonlinear_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &plastic_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &temperature_flag, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &nonlinear_langevin_flag, sizeof(int), 1, fp, nullptr, error);
   }
   MPI_Bcast(&smooth_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&normalize_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&nonlinear_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&plastic_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&temperature_flag, 1, MPI_INT, 0, world);
+  MPI_Bcast(&nonlinear_langevin_flag, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -682,6 +748,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double r0, rn, r0p, rc, ep;
   double k_temp, eta_temp, exp_j, Hn, term1, term2;
   double fel, fint;
+  double Nb,numer,denom,lam;
 
   // rn, ep, hn can be updated, so search bondlist vs. fix_bond_history->get_atom_value()
   tagint tagi = tag[i];
@@ -743,6 +810,15 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     double lam = (r - r0p) / (rc - r0p);
     fel = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
     fforce += fel;
+  } else if (nonlinear_langevin_flag) {
+    Nb = N[type] * b[type]; 
+    lam = r/Nb;
+    
+    numer = lam*(3.0 - pow(lam,2.0));
+    denom = 1.0 - pow(lam,2.0);
+    fel = -k0[type]*numer/denom/b[type];
+    fforce += fel;
+
   } else {
     fel = k0[type] * (r0p - r);
     fforce += fel;
