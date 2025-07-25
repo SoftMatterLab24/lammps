@@ -354,10 +354,19 @@ void BondBPMProny::compute(int eflag, int vflag)
     bondstore[n][1] = r;
     
     //bond break criterion
-    if ((fabs(e) > ecrit[type]) && break_flag) {
+
+    if (nonlinear_langevin_flag) {
+      if (r > 0.96* N[type] * b[type]) {
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
+      }
+    } else {
+      if ((fabs(e) > ecrit[type]) && break_flag) {  
+      bondlist[n][2] = 0;
+      process_broken(i1, i2);
+      continue;
+      }
     }
 
     //plastic calculations
@@ -402,6 +411,8 @@ void BondBPMProny::compute(int eflag, int vflag)
       denom = 1.0 - pow(lam,2.0);
       fbond = -k0[type]*numer/denom/b[type];
     }
+
+    
 
     // rate-dependent part of bond force
     // Loop through Maxwell elements
@@ -530,6 +541,7 @@ void BondBPMProny::coeff(int narg, char **arg)
   while (iarg < narg) {
     if (strcmp(arg[iarg],"nonlinear/langevin") == 0) {
         if (iarg+3 > narg) error->all(FLERR,"Illegal fix bond/bpm/prony command");
+        nonlinear_langevin_flag = 1;
         N_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
         b_one = utils::numeric(FLERR, arg[iarg+2], false, lmp);
         iarg += 3;
