@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
     BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr), 
-    aT(nullptr), aT_temp(nullptr), id_fix_property_bond(nullptr)
+    aT(nullptr), aT_temp(nullptr), N(nullptr), b(nullptr), id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
@@ -524,12 +524,14 @@ void BondBPMProny::coeff(int narg, char **arg)
     iarg += 1;
   } 
 
+  double N_one = 1;
+  double b_one = 1;
   // optional for 
   while (iarg < narg) {
     if (strcmp(arg[iarg],"nonlinear/langevin") == 0) {
         if (iarg+3 > narg) error->all(FLERR,"Illegal fix bond/bpm/prony command");
-        double N_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
-        double b_one = utils::numeric(FLERR, arg[iarg+2], false, lmp);
+        N_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
+        b_one = utils::numeric(FLERR, arg[iarg+2], false, lmp);
         iarg += 3;
     }
   }

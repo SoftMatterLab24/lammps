@@ -52,7 +52,7 @@ class BondBPMProny : public BondBPM {
   double *len_current, **H;
   double *aT_temp;
   double dt_temp;
-  double N, b;
+  double *N, *b;
 
   struct Table {
    int ninput, fpflag;
