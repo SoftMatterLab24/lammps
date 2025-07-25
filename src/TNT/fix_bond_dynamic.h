@@ -44,6 +44,8 @@ class FixBondDynamic : public Fix {
 
   // Default arguments
   int nevery,iatomtype,jatomtype,btype;
+  char *ka_str, *kd_str;
+  int ka_var, ka_style, kd_var, kd_style;
   double ka,kd,cutsq;
 
   // Seed for random numbers
@@ -53,7 +55,7 @@ class FixBondDynamic : public Fix {
   int maxbond;
 
   // Flags for keywords
-  int flag_bell, flag_catch, flag_prob, flag_rouse, flag_critical, flag_mol;
+  int flag_bell, flag_catch, flag_ellis, flag_prob, flag_rouse, flag_critical, flag_mol;
 
   // Explicit probabilities for flag_prob
   double prob_attach, prob_detach;
@@ -64,6 +66,9 @@ class FixBondDynamic : public Fix {
   // Force sensitivities for flag_catch
   double fs0, fc0, kc0_scale;
 
+  // Parameters for flag_ellis
+  double kd_max, fbond_y, alph;
+
   // Lengthscale for flag_rouse
   double b2;
 
@@ -73,6 +78,9 @@ class FixBondDynamic : public Fix {
   // Pointers for random numbers and neighbor list
   class RanMars *random;
   class NeighList *list;
+
+  int n_histories;
+  std::vector<Fix *> histories;
 
   // Flag for initializing fbd
   int countflag;

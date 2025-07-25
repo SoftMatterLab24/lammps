@@ -30,6 +30,9 @@
 #include "respa.h"
 #include "update.h"
 #include <iostream>
+#include "fix_bond_history.h"
+#include "input.h"
+#include "variable.h"
 
 #include <cstring>
 #include "math_const.h"
@@ -38,13 +41,16 @@
 using namespace LAMMPS_NS;
 using namespace FixConst;
 
+enum {CONSTANT, EQUAL};
+
 /* ---------------------------------------------------------------------- */
 
 FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
   distsq(nullptr), probabilities(nullptr), list(nullptr),
   random(nullptr), partners_possible_f(nullptr), partners_probs_f(nullptr),
-  partners_possible(nullptr), partners_probs(nullptr), npos(nullptr), partners_success(nullptr)
+  partners_possible(nullptr), partners_probs(nullptr), npos(nullptr), partners_success(nullptr),
+  ka_str(nullptr), kd_str(nullptr)
 {
   if (narg < 9) error->all(FLERR,"Illegal fix bond/dynamic command");
 
@@ -61,8 +67,22 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   iatomtype = utils::inumeric(FLERR,arg[4],false,lmp);
   jatomtype = utils::inumeric(FLERR,arg[5],false,lmp);
   btype = utils::inumeric(FLERR,arg[6],false,lmp);
-  ka = utils::numeric(FLERR,arg[7],false,lmp);
-  kd = utils::numeric(FLERR,arg[8],false,lmp);
+
+  // see if ka and kd are variables or constants
+  if (utils::strmatch(arg[7], "^v_")) {
+    ka_str = utils::strdup(arg[7] + 2);
+    ka_style = EQUAL;
+  } else {
+    ka = utils::numeric(FLERR, arg[7], false, lmp);
+    ka_style = CONSTANT;
+  }
+  if (utils::strmatch(arg[8], "^v_")) {
+    kd_str = utils::strdup(arg[8] + 2);
+    kd_style = EQUAL;
+  } else {
+    kd = utils::numeric(FLERR, arg[8], false, lmp);
+    kd_style = CONSTANT;
+  }
   double cutoff = utils::numeric(FLERR,arg[9],false,lmp);
 
   if (btype < 1 || btype > atom->nbondtypes)
@@ -79,6 +99,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   flag_prob = 0;
   flag_bell = 0;
   flag_catch = 0;
+  flag_ellis = 0;
   flag_rouse = 0;
   flag_critical = 0;
   flag_mol = 0;
@@ -112,6 +133,13 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
       kc0_scale = utils::numeric(FLERR,arg[iarg+3],false,lmp);
       flag_catch = 1;
       iarg += 4;
+    } else if (strcmp(arg[iarg],"ellis") == 0) {
+      if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
+      kd_max = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+      fbond_y = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+      alph = utils::numeric(FLERR,arg[iarg+3],false,lmp);
+      flag_ellis = 1;
+      iarg += 4;
     } else if (strcmp(arg[iarg],"rouse") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
       double b0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
@@ -141,8 +169,14 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
     error->all(FLERR,"Cannot use argument prob with argument bell");
   if (flag_prob && flag_catch)
     error->all(FLERR,"Cannot use argument prob with argument catch");
+  if (flag_prob && flag_ellis)
+    error->all(FLERR,"Cannot use argument prob with argument ellis");
   if (flag_bell && flag_catch)
     error->all(FLERR,"Cannot use argument bell with argument catch");
+  if (flag_bell && flag_ellis)
+    error->all(FLERR,"Cannot use argument bell with argument ellis");
+  if (flag_ellis && flag_catch)
+    error->all(FLERR,"Cannot use argument ellis with argument catch");
   if (atom->molecular != Atom::MOLECULAR)
     error->all(FLERR,"Cannot use fix bond/dynamic with non-molecular systems");
   if (atom->bond_per_atom < maxbond)
@@ -180,6 +214,7 @@ FixBondDynamic::~FixBondDynamic()
 
   if (new_fix_id && modify->nfix) modify->delete_fix(new_fix_id);
   delete [] new_fix_id;
+  delete [] ka_str;
 
 }
 
@@ -231,6 +266,28 @@ void FixBondDynamic::init()
   // need a half neighbor list, built every Nevery steps
   neighbor->add_request(this, NeighConst::REQ_OCCASIONAL);
 
+  // find instances of bond history to delete/shift data
+  histories = modify->get_fix_by_style("BOND_HISTORY");
+  n_histories = histories.size();
+
+  // check variables
+  if (ka_str) {
+    ka_var = input->variable->find(ka_str);
+    if (ka_var < 0) error->all(FLERR, "Variable {} for fix bond/dynamic does not exist", ka_str);
+    if (input->variable->equalstyle(ka_var))
+      ka_style = EQUAL;
+    else
+      error->all(FLERR, "Variable {} for fix bond/dynamic is invalid style", ka_str);
+  }
+  if (kd_str) {
+    kd_var = input->variable->find(kd_str);
+    if (kd_var < 0) error->all(FLERR, "Variable {} for fix bond/dynamic does not exist", kd_str);
+    if (input->variable->equalstyle(kd_var))
+      kd_style = EQUAL;
+    else
+      error->all(FLERR, "Variable {} for fix bond/dynamic is invalid style", kd_str);
+  }
+
 }
 
 /* ---------------------------------------------------------------------- */
@@ -268,8 +325,6 @@ void FixBondDynamic::setup(int /*vflag*/)
   for (int i = 0; i < nlocal; i++) {
     if (num_bond[i] == 0) continue;
     for (int b = 0; b < num_bond[i]; b++) {
-      //printf("Bond Type: %i\n",bond_type_raw[i][b]);
-      //printf("Bond Type: %i\n",bond_type[i][b]);
       if (bond_type[i][b] == btype) {
       fbd[i][b] = bond_atom[i][b];
       }
@@ -324,6 +379,19 @@ void FixBondDynamic::post_integrate()
   int *type = atom->type;
   Bond *bond = force->bond;
   double DT_EQ = (update->dt)*nevery;
+
+  // Need to grab correct rates
+  if (ka_style == EQUAL) {
+    ka = input->variable->compute_equal(ka_var);
+  } else if (ka_style == CONSTANT) {
+
+  }
+  if (kd_style == EQUAL) {
+    kd = input->variable->compute_equal(kd_var);
+  } else if (kd_style == CONSTANT) {
+
+  }
+  //printf("Rates ka %f | kd %f |\n",ka,kd);
   // JTC: Probably not worth worrying about, but this definition of DT_EQ won't be
   // compatible with a variable timestep like that used in fix dt/reset.
   // Not sure there's a great solution (maybe incrementing?) or a good error check
@@ -343,28 +411,12 @@ void FixBondDynamic::post_integrate()
       
       // Tag of current bond pair
       tagint tagj = fbd[i][b];
-
-      //printf("atom: %i, i-b type: %i\n",tag[i],bond_type[i][b]);
-      //printf("i-tagj type: %i\n",bond_type[i][tagj]);
       
       // tagj < 1 means bond is already detached or there is no bond
       if (tagj < 1) continue;
 
       // Skip bonds that dont belong to right type (test)
       if (bond_type[i][b] != btype or bond_type[i][b] == 0) continue;
-
-      // Skip bonds that don't belong to the right type (slow)
-      //for (int n = 0; n < nbondlist; n++) {
-      //  int iatom = bondlist[n][0];
-      //  int jatom = bondlist[n][1];
-
-      //  if((tag[iatom]==tag[i] and tag[jatom]==tagj) || (tag[iatom]==tagj and tag[jatom]==tag[i])) {
-      //    bondtype = bondlist[n][2];
-      //    break;
-      //  }
-      //}
-
-      //if (bondtype != btype) continue;
       
       // Local id of current bond pair
       int j = atom->map(tagj);
@@ -410,7 +462,7 @@ void FixBondDynamic::post_integrate()
       }
       if (flag_catch) {
 
-         // Find distance between two atoms
+        // Find distance between two atoms
         double delx = x[i][0] - x[j][0];
         double dely = x[i][1] - x[j][1];
         double delz = x[i][2] - x[j][2];
@@ -426,14 +478,27 @@ void FixBondDynamic::post_integrate()
         // Modify kd using two-path catch model
         // kd = slip + catch
         double kd_catch = kd*exp(fabs(bondforce)/fs0) + kd*kc0_scale*exp(-fabs(bondforce)/fc0);
-        //printf("kd_catch %4.4f\n",kd_catch);
-        //printf("fbond %4.4f\n",fbond);
-        //printf("fs0 %4.4f\n",fs0);
-        //printf("fc0 %4.4f\n",fc0);
-        //printf("kco_scale %4.4f\n",kc0_scale);
-        //printf("bond %4.4f\n",bondforce);
-        
         p_detach = 1 - exp(-kd_catch*DT_EQ);
+      }
+      if (flag_ellis) {
+        // Find distance between two atoms
+        double delx = x[i][0] - x[j][0];
+        double dely = x[i][1] - x[j][1];
+        double delz = x[i][2] - x[j][2];
+        domain->minimum_image(delx, dely, delz);
+        double rsq = delx*delx + dely*dely + delz*delz;
+
+        // Find force in bond
+        double fbond; // fbond is returned as f/r
+        double engpot = bond->single(btype,rsq,i,j,fbond);
+        double r = sqrt(rsq);
+        double bondforce = fabs(fbond)*r; 
+
+        // Modify kd using ellis model
+        double numer = kd_max - kd;
+        double denom = 1 + exp(-alph*(bondforce-fbond_y));
+        double kd_ellis = kd + numer / denom;
+        p_detach = 1 - exp(-kd_ellis*DT_EQ);
       }
       if (flag_critical) {
 
@@ -636,7 +701,6 @@ void FixBondDynamic::post_integrate()
         p_attach = 1 - exp(-ka_rouse*DT_EQ);
       }
       if (flag_prob) {
-
         // Set attachment probability directly
         p_attach = prob_attach;
       }
@@ -946,10 +1010,11 @@ void FixBondDynamic::post_integrate()
 
 void FixBondDynamic::process_broken(int i, int j)
 {
-  
-  // First add the pair to new_broken_pairs
+// First add the pair to new_broken_pairs
   auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
   new_broken_pairs.push_back(tag_pair);
+
+  int m, n, l, nmax;
 
   // Manually search and remove from atom arrays
   // need to remove in case special bonds arrays rebuilt
@@ -959,39 +1024,67 @@ void FixBondDynamic::process_broken(int i, int j)
   tagint **bond_atom = atom->bond_atom;
   int **bond_type = atom->bond_type;
   int *num_bond = atom->num_bond;
+
+  int **bondlist = neighbor->bondlist;
+  int nbondlist = neighbor->nbondlist;
   
-
   if (i < nlocal) {
-    int n = num_bond[i];
-
-    int done = 0;
-    for (int m = 0; m < n; m++) {
+    
+    for (m = (num_bond[i] - 1); m >= 0; m--) {
       if (bond_atom[i][m] == tag[j]) {
-        for (int k = m; k < n - 1; k++) {
-          bond_type[i][k] = bond_type[i][k + 1];
-          bond_atom[i][k] = bond_atom[i][k + 1];
+
+        nmax = num_bond[i] - 1;
+        if (m == nmax) {
+          if (n_histories > 0)
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->delete_history(i, m);
+            }
+        } else {
+          bond_type[i][m] = bond_type[i][nmax];
+          bond_atom[i][m] = bond_atom[i][nmax];
+          if (n_histories > 0) {
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->shift_history(i, m, nmax);
+              fix_bond_history->delete_history(i, nmax);
+            }
+          }
         }
+        bond_type[i][nmax] = 0;
         num_bond[i]--;
         break;
       }
-      if (done) break;
     }
   }
 
   if (j < nlocal) {
-    int n = num_bond[j];
+    
+    for (n = (num_bond[j] - 1); n >= 0; n--) {
+      if (bond_atom[j][n] == tag[i]) {
 
-    int done = 0;
-    for (int m = 0; m < n; m++) {
-      if (bond_atom[j][m] == tag[i]) {
-        for (int k = m; k < n - 1; k++) {
-          bond_type[j][k] = bond_type[j][k + 1];
-          bond_atom[j][k] = bond_atom[j][k + 1];
+        nmax = num_bond[j] - 1;
+        if (n == nmax) {
+          if (n_histories > 0)
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->delete_history(j, n);
+            }
+        } else {
+          bond_type[j][n] = bond_type[j][nmax];
+          bond_atom[j][n] = bond_atom[j][nmax];
+          if (n_histories > 0) {
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->shift_history(j, n, nmax);
+              fix_bond_history->delete_history(j, nmax);
+            }
+          }
         }
+        bond_type[j][nmax] = 0;
         num_bond[j]--;
         break;
       }
-      if (done) break;
     }
   }
 
@@ -1024,9 +1117,10 @@ void FixBondDynamic::process_broken(int i, int j)
     nspecial[j][1] = nspecial[j][2] = nspecial[j][0];
   }
 
-}
+  // trigger reneighboring
+  next_reneighbor = update->ntimestep;
 
-/* --------------------------------------------------------------------- */
+}
 
 void FixBondDynamic::process_created(int i, int j)
 {
@@ -1040,6 +1134,9 @@ void FixBondDynamic::process_created(int i, int j)
   int *num_bond = atom->num_bond;
 
   int nlocal = atom->nlocal;
+
+  // tally newly created bond
+  atom->nbonds += 1;
 
   // Add bonds to atom class for i and j
   if (i < nlocal) {
