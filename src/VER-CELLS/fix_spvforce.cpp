@@ -16,7 +16,7 @@
 #include "atom.h"
 #include "atom_masks.h"
 #include "atom_vec.h"
-#include "cell.hh"
+// #include "cell.hh"
 #include "comm.h"
 #include "compute.h"
 #include "domain.h"
@@ -31,6 +31,7 @@
 #include "respa.h"
 #include "update.h"
 #include "variable.h"
+
 
 #include <algorithm>
 #include <bits/stdc++.h>
@@ -47,6 +48,7 @@
 #include <stdlib.h>
 #include <string>
 #include <vector>
+#include <voro++.hh>
 
 using namespace LAMMPS_NS;
 using namespace FixConst;
