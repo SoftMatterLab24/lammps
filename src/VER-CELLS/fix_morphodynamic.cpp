@@ -61,7 +61,7 @@ using namespace std::chrono;
 using namespace voro;
 
 enum { NONE, CONSTANT, EQUAL, ATOM };
-
+//test
 /* ---------------------------------------------------------------------- */
 
 FixMorphoDynamic::FixMorphoDynamic(LAMMPS *lmp, int narg, char **arg) :
@@ -2735,4 +2735,5 @@ double FixMorphoDynamic::memory_usage()
 
 /*--------------------------------------------------------------------
                         END OF MAIN CODE
+
 ---------------------------------------------------------------------*/
