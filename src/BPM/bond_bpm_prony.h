@@ -54,11 +54,11 @@ class BondBPMProny : public BondBPM {
   double dt_temp;
 
   struct Table {
-   int ninput, fpflag;
+   int ninput, nninput, fpflag;
    double fplo, fphi, r0;
    double lo, hi;
-   double *kfile, *etafile, *expfile;
-   double *k, *eta, *expj;
+   double *kfile, *etafile, *expfile, *Nfile, *bfile;
+   double *k, *eta, *expj, *N, *b;
   };
 
   int tabstyle, tablength, ntables, *tabindex;
@@ -74,6 +74,7 @@ class BondBPMProny : public BondBPM {
   void bcast_table(Table *);
   
   void param_extract(Table *, char *);
+  void nonlinear_param_extract(Table *, char *);
   void update_table(int);
 };
 

@@ -458,7 +458,7 @@ void FixBondDynamic::post_integrate()
         double delx = x[i][0] - x[j][0];
         double dely = x[i][1] - x[j][1];
         double delz = x[i][2] - x[j][2];
-        domain->minimum_image(delx, dely, delz);
+        domain->minimum_image(FLERR,delx, dely, delz);
         double rsq = delx*delx + dely*dely + delz*delz;
 
         // Find force in bond
@@ -477,7 +477,7 @@ void FixBondDynamic::post_integrate()
         double delx = x[i][0] - x[j][0];
         double dely = x[i][1] - x[j][1];
         double delz = x[i][2] - x[j][2];
-        domain->minimum_image(delx, dely, delz);
+        domain->minimum_image(FLERR,delx, dely, delz);
         double rsq = delx*delx + dely*dely + delz*delz;
 
         // Find force in bond
@@ -496,7 +496,7 @@ void FixBondDynamic::post_integrate()
         double delx = x[i][0] - x[j][0];
         double dely = x[i][1] - x[j][1];
         double delz = x[i][2] - x[j][2];
-        domain->minimum_image(delx, dely, delz);
+        domain->minimum_image(FLERR,delx, dely, delz);
         double rsq = delx*delx + dely*dely + delz*delz;
 
         // Find force in bond
@@ -517,7 +517,7 @@ void FixBondDynamic::post_integrate()
         double delx = x[i][0] - x[j][0];
         double dely = x[i][1] - x[j][1];
         double delz = x[i][2] - x[j][2];
-        domain->minimum_image(delx, dely, delz);
+        domain->minimum_image(FLERR,delx, dely, delz);
         double rsq = delx*delx + dely*dely + delz*delz;
 
         // Compare to critical length for forced detachment
@@ -702,7 +702,7 @@ void FixBondDynamic::post_integrate()
       double delx = x[i][0] - x[j][0];
       double dely = x[i][1] - x[j][1];
       double delz = x[i][2] - x[j][2];
-      domain->minimum_image(delx, dely, delz);
+      domain->minimum_image(FLERR,delx, dely, delz);
       double rsq = delx*delx + dely*dely + delz*delz;
 
       // Skip if out of range
@@ -935,7 +935,7 @@ void FixBondDynamic::post_integrate()
           double delx = x[i][0] - x[j][0];
           double dely = x[i][1] - x[j][1];
           double delz = x[i][2] - x[j][2];
-          domain->minimum_image(delx, dely, delz);
+          domain->minimum_image(FLERR,delx, dely, delz);
           double rsq = delx*delx + dely*dely + delz*delz;
           if (rsq >= r2_critical) flag_remove = 1;
         }

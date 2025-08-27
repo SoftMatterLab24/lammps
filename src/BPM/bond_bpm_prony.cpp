@@ -210,7 +210,7 @@ void BondBPMProny::store_data()
       delz = x[i][2] - x[j][2];
 
       // Get closest image in case bonded with ghost
-      domain->minimum_image(delx, dely, delz);
+      domain->minimum_image(FLERR,delx, dely, delz);
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
       fix_bond_history->update_atom_value(i, m, 0, r);
@@ -792,8 +792,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
 void BondBPMProny::null_table(Table *tb)
 {
-  tb->kfile = tb->etafile = tb->expfile = nullptr;
-  tb->k = tb->eta = tb->expj = nullptr;
+  tb->kfile = tb->etafile = tb->expfile = tb->Nfile = tb->bfile = nullptr;
+  tb->k = tb->eta = tb->expj = = tb->N = tb->b =  nullptr;
 
 }
 
@@ -804,10 +804,14 @@ void BondBPMProny::free_table(Table *tb)
   memory->destroy(tb->kfile);
   memory->destroy(tb->etafile);
   memory->destroy(tb->expfile);
+  memory->destroy(tb->Nfile);
+  memory->destroy(tb->bfile);
 
   memory->destroy(tb->k);
   memory->destroy(tb->eta);
   memory->destroy(tb->expj);
+  memory->destroy(tb->N);
+  memory->destroy(tb->b);
 
 }
 
@@ -815,12 +819,11 @@ void BondBPMProny::free_table(Table *tb)
    read table file, only called by proc 0
 ------------------------------------------------------------------------- */
 
-void BondBPMProny::read_table(Table *tb, char *file, char *keyword)
+void BondBPMProny::read_table(Table *tb, char *file, char *keyword, char *file_nl, char *keyword_nl)
 {
   double dt = update->dt;
   
   TableFileReader reader(lmp, file, "bond");
-
   char *line = reader.find_section_start(keyword);
 
   if (!line) error->one(FLERR, "Did not find keyword {} in table file", keyword);
@@ -862,6 +865,42 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword)
 
   printf("Read %i parameters from bond table\n",tb->ninput);
 
+  // if nonlinear option enabled, read additional table parameters
+  if (nonlinear_flag) {
+
+    TableFileReader reader(lmp, file_nl, "bond");
+    char *line_nl = reader.find_section_start(keyword_nl);
+    
+    if (!line_nl) error->one(FLERR, "Did not find keyword {} in nonlinear table file", keyword_nl);
+    // read table values from file
+    // allocate memory for nonlinear
+
+    line_nl = reader.next_line();
+    param_extract(tb, line_nl);
+    memory->create(tb->Nfile, tb->nninput, "bond:Nfile");
+    memory->create(tb->bfile, tb->nninput, "bond:bfile");
+
+    // need the new file name and keyword
+
+    int r0idx = -1;
+
+    reader.skip_line();
+    for (int i = 0; i < tb->nninput; i++) {
+      line_nl = reader.next_line();
+      if (!line_nl)
+      error->one(FLERR, "Data missing when parsing bond table '{}' line {} of {}.", keyword_nl, i + 1,
+                 tb->nninput);
+      try {
+        values.next_int();
+        tb->Nfile[i] = values.next_double(); 
+        tb->bfile[i] = values.next_double();
+      } catch (TokenizerException &e) {
+        error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword_nl,
+                   i + 1, tb->nninput, e.what(), line_nl);
+      }
+    }
+  }
+
 }
 
 /* ----------------------------------------------------------------------
@@ -898,9 +937,42 @@ void BondBPMProny::param_extract(Table *tb, char *line)
   
 }
 
+/* ----------------------------------------------------------------------
+   extract attributes for nonlinear parameter line in table section
+   format of line: N value FP fplo fphi EQ r0
+   N is required, other params are optional
+------------------------------------------------------------------------- */
+
+void BondBPMProny::nonlinear_param_extract(Table *tb, char *line)
+{
+  tb->nninput = 0;
+
+  try {
+    ValueTokenizer values(line);
+
+    while (values.has_next()) {
+      std::string word = values.next_string();
+
+      if (word == "N") {
+        tb->nninput = values.next_int();
+      } else {
+        error->one(FLERR, "Unknown keyword {} in bond table parameters", word);
+      }
+    }
+  } catch (TokenizerException &e) {
+    error->one(FLERR, e.what());
+  }
+
+  if (tb->nninput == 0) error->one(FLERR, "Bond table parameters did not set N");
+
+  //if (!(tb->ninput == nhistory - 3)) error->one(FLERR, "Mismatched args for bond table parameter N");
+  //if (tb->ninput > nhistory - 3) error->one(FLERR, "New element exceeded elements per bond in table file");
+  
+}
+
 /* ---------------------------------------------------------------------- */
 
- void BondBPMProny::update_table(int type)
+void BondBPMProny::update_table(int type)
 {   
   double dt = update->dt;
   double k_temp, eta_temp, exp_j;
