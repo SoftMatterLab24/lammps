@@ -37,7 +37,7 @@ using namespace LAMMPS_NS;
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
     BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr), 
-    aT(nullptr), aT_temp(nullptr), id_fix_property_bond(nullptr)
+    aT(nullptr), aT_temp(nullptr), fcrit(nullptr), id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
@@ -88,6 +88,7 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(eplastic);
     memory->destroy(aT);
     memory->destroy(aT_temp);
+    memory->destroy(fcrit);
   }
 
 }
@@ -334,8 +335,8 @@ void BondBPMProny::compute(int eflag, int vflag)
     // update bond length in bondstore
     bondstore[n][1] = r;
     
-    //bond break criterion
-    if ((fabs(e) > ecrit[type]) && break_flag) {  
+    //bond break criterion //disable for nonlinear
+    if (((fabs(e) > ecrit[type]) && break_flag) && !nonlinear_flag) {  
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
@@ -383,8 +384,16 @@ void BondBPMProny::compute(int eflag, int vflag)
 
       fbond = -k0[type]*numer/denom/b;
 
-      printf("Nonlinear force %f %f %f\n",fbond,N,b);
+      // Bond breaking for nonlinear
+      if (fabs(fbond) > fcrit[type]) {
+        bondlist[n][2] = 0;
+        process_broken(i1, i2);
+        continue;
+      }
 
+      if (lam > 0.99) error->warning(FLERR, "POLY bond too long: {} {:.8}", update->ntimestep, lam);
+      if (lam > 2.0) error->one(FLERR, "Bad PRONY bond");
+      
     } else {
       fbond = k0[type] * (r0p - r);
     }
@@ -486,13 +495,16 @@ void BondBPMProny::coeff(int narg, char **arg)
   double ecrit_one = utils::numeric(FLERR, arg[2], false, lmp);
   double gamma_one = utils::numeric(FLERR, arg[3], false, lmp);
 
-  // grab file information
+  // grab nonlinear coeffs
   char *file_nl = nullptr;
   char *keyword_nl = nullptr;
+  double fcrit_one = 0.0;
+
   if (nonlinear_flag) {
     try {
       file_nl = arg[9];
       keyword_nl = arg[10];
+      fcrit_one = utils::numeric(FLERR, arg[11], false, lmp);
     } catch (...) {
       error->all(FLERR, "Incorrect bond coefficient for nonlinear option");
     }
@@ -530,6 +542,7 @@ void BondBPMProny::coeff(int narg, char **arg)
     eplastic[i] = eplastic_one;
     aT[i] = aT_one;
     aT_temp[i] = aT_one;
+    fcrit[i] = fcrit_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
     
@@ -620,6 +633,9 @@ void BondBPMProny::write_restart(FILE *fp)
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&lamc[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&eplastic[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&aT[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&aT_temp[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&fcrit[1], sizeof(double), atom->nbondtypes, fp);
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
@@ -643,6 +659,7 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &eplastic[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &fcrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -655,7 +672,8 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&eplastic[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&aT[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&aT_temp[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&aT_temp[1], atom->nbondtypes, MPI_DOUBLE, 0, world);\
+  MPI_Bcast(&fcrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
