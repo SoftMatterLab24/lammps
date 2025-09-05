@@ -265,6 +265,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, r0, rn , r0p, rc , rinv,  smooth, fbond, dot;
   double k_temp, eta_temp, exp_j, Hn, term1, term2, term3;
+  double N, b, Nb, lam, numer, denom;
 
   ev_init(eflag, vflag);
 
@@ -363,13 +364,27 @@ void BondBPMProny::compute(int eflag, int vflag)
     if (normalize_flag) {
       fbond = -k0[type] * (e - ep);
     } else if (nonlinear_flag) {
-      if (r > r0p) {
-        rc = r0p * lamc[type]; // if bond is in tension
-      } else {
-        rc = 0; // if bond is in compression
-      }
-      double lam = (r - r0p) / (rc - r0p);
-      fbond = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
+      //if (r > r0p) {
+      //  rc = r0p * lamc[type]; // if bond is in tension
+      //} else {
+      //  rc = 0; // if bond is in compression
+      // }
+      //double lam = (r - r0p) / (rc - r0p);
+      //fbond = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
+
+      // New nonlinear - langevin
+      N = tb->Nfile[n];
+      b = tb->bfile[n];
+
+      Nb = N * b;
+      lam = r/Nb;
+      numer = lam*(3.0 - pow(lam,2.0));
+      denom = 1.0 - pow(lam,2.0);
+
+      fbond = -k0[type]*numer/denom/b;
+
+      printf("Nonlinear force %f %f %f\n",fbond,N,b);
+
     } else {
       fbond = k0[type] * (r0p - r);
     }
@@ -471,19 +486,31 @@ void BondBPMProny::coeff(int narg, char **arg)
   double ecrit_one = utils::numeric(FLERR, arg[2], false, lmp);
   double gamma_one = utils::numeric(FLERR, arg[3], false, lmp);
 
+  // grab file information
+  char *file_nl = nullptr;
+  char *keyword_nl = nullptr;
+  if (nonlinear_flag) {
+    try {
+      file_nl = arg[9];
+      keyword_nl = arg[10];
+    } catch (...) {
+      error->all(FLERR, "Incorrect bond coefficient for nonlinear option");
+    }
+  }
+
   tables = (Table *) memory->srealloc(tables, (ntables + 1) * sizeof(Table), "bond:tables");
   Table *tb = &tables[ntables];
   null_table(tb);
-  if (comm->me == 0) read_table(tb, arg[4], arg[5]);
+  if (comm->me == 0) read_table(tb, arg[4], arg[5],file_nl, keyword_nl);
   bcast_table(tb);
 
   double lamc_one = utils::numeric(FLERR, arg[6], false, lmp);
   double eplastic_one = utils::numeric(FLERR, arg[7], false, lmp);
   double aT_one = 1; 
 
-  if ((nonlinear_flag) && (lamc_one <= 1)) {
-    error->all(FLERR, "Incorrect bond coefficient maximum extension must be greater than one");
-  }
+  //if ((nonlinear_flag) && (lamc_one <= 1)) {
+  //  error->all(FLERR, "Incorrect bond coefficient maximum extension must be greater than one");
+  //}
 
   // Parse optional remaining arguments
   int iarg = 8;
@@ -573,6 +600,9 @@ void BondBPMProny::settings(int narg, char **arg)
 
   if (nonlinear_flag && !break_flag)
     error->all(FLERR, "Illegal bond bpm command, must turn on breaking with nonlinear yes option");
+
+  if (nonlinear_flag && plastic_flag)
+    error->all(FLERR, "Illegal bond bpm command, must turn off plasticity with nonlinear yes option");
 
 }
 
@@ -685,7 +715,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double r0, rn, r0p, rc, ep;
   double k_temp, eta_temp, exp_j, Hn, term1, term2;
   double fel, fint;
-  double Nb,numer,denom,lam;
+  double N, b, Nb, lam, numer, denom;
 
   // rn, ep, hn can be updated, so search bondlist vs. fix_bond_history->get_atom_value()
   tagint tagi = tag[i];
@@ -739,13 +769,25 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     fel = -k0[type] * (e - ep);
     fforce += fel;
   } else if (nonlinear_flag) {
-    if (r > r0p) {
-      rc = r0p * lamc[type]; // if bond is in tension
-    } else {
-      rc = 0; // if bond is in compression
-    }
-    double lam = (r - r0p) / (rc - r0p);
-    fel = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
+    //if (r > r0p) {
+    //  rc = r0p * lamc[type]; // if bond is in tension
+    //} else {
+    //  rc = 0; // if bond is in compression
+    //}
+    //double lam = (r - r0p) / (rc - r0p);
+    //fel = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
+    //fforce += fel;
+
+    // New nonlinear - langevin
+    N = tb->Nfile[n];
+    b = tb->bfile[n];
+
+    Nb = N * b;
+    lam = r/Nb;
+    numer = lam*(3.0 - pow(lam,2.0));
+    denom = 1.0 - pow(lam,2.0);
+
+    fel = -k0[type]*numer/denom/b;
     fforce += fel;
   } else {
     fel = k0[type] * (r0p - r);
@@ -793,7 +835,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 void BondBPMProny::null_table(Table *tb)
 {
   tb->kfile = tb->etafile = tb->expfile = tb->Nfile = tb->bfile = nullptr;
-  tb->k = tb->eta = tb->expj = = tb->N = tb->b =  nullptr;
+  tb->k = tb->eta = tb->expj = tb->N = tb->b =  nullptr;
 
 }
 
@@ -876,7 +918,7 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword, char *file_n
     // allocate memory for nonlinear
 
     line_nl = reader.next_line();
-    param_extract(tb, line_nl);
+    nonlinear_param_extract(tb, line_nl);
     memory->create(tb->Nfile, tb->nninput, "bond:Nfile");
     memory->create(tb->bfile, tb->nninput, "bond:bfile");
 
@@ -891,14 +933,18 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword, char *file_n
       error->one(FLERR, "Data missing when parsing bond table '{}' line {} of {}.", keyword_nl, i + 1,
                  tb->nninput);
       try {
+        ValueTokenizer values(line_nl);
         values.next_int();
         tb->Nfile[i] = values.next_double(); 
         tb->bfile[i] = values.next_double();
+
       } catch (TokenizerException &e) {
         error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword_nl,
                    i + 1, tb->nninput, e.what(), line_nl);
       }
     }
+
+    printf("Read parameters for %i bonds from nonlinear bond table\n",tb->nninput);
   }
 
 }
@@ -943,12 +989,12 @@ void BondBPMProny::param_extract(Table *tb, char *line)
    N is required, other params are optional
 ------------------------------------------------------------------------- */
 
-void BondBPMProny::nonlinear_param_extract(Table *tb, char *line)
+void BondBPMProny::nonlinear_param_extract(Table *tb, char *line_nl)
 {
   tb->nninput = 0;
 
   try {
-    ValueTokenizer values(line);
+    ValueTokenizer values(line_nl);
 
     while (values.has_next()) {
       std::string word = values.next_string();
@@ -1006,11 +1052,15 @@ void BondBPMProny::bcast_table(Table *tb) // *UPDATED
     memory->create(tb->kfile, tb->ninput, "bond:kfile");
     memory->create(tb->etafile, tb->ninput, "bond:etafile");
     memory->create(tb->expfile, tb->ninput, "bond:expfile");
+    memory->create(tb->Nfile, tb->nninput, "bond:Nfile");
+    memory->create(tb->bfile, tb->nninput, "bond:bfile");
   }
 
   MPI_Bcast(tb->kfile, tb->ninput, MPI_DOUBLE, 0, world);
   MPI_Bcast(tb->etafile, tb->ninput, MPI_DOUBLE, 0, world);
   MPI_Bcast(tb->expfile, tb->ninput, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tb->Nfile, tb->nninput, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tb->bfile, tb->nninput, MPI_DOUBLE, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */

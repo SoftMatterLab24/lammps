@@ -70,7 +70,7 @@ class BondBPMProny : public BondBPM {
 
   void null_table(Table *);
   void free_table(Table *);
-  void read_table(Table *, char *, char *);
+  void read_table(Table *, char *, char *, char *, char *);
   void bcast_table(Table *);
   
   void param_extract(Table *, char *);
