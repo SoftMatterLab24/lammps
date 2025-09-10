@@ -49,12 +49,12 @@ class BondBPMProny : public BondBPM {
 
   int index_vol, index_vol0, nmax;
   char *id_fix_property_bond;
-  double *len_current, **H;
   double *aT_temp;
   double dt_temp;
 
   struct Table {
    int ninput, nninput, fpflag;
+   int *iatomfile, *jatomfile;
    double fplo, fphi, r0;
    double lo, hi;
    double *kfile, *etafile, *expfile, *Nfile, *bfile;
@@ -76,6 +76,7 @@ class BondBPMProny : public BondBPM {
   void param_extract(Table *, char *);
   void nonlinear_param_extract(Table *, char *);
   void update_table(int);
+  void bond_lookup(int, int, int, double &, double &);
 };
 
 }    // namespace LAMMPS_NS
