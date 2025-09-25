@@ -51,8 +51,8 @@ BondBPMPoly::BondBPMPoly(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_POLY");
 
-  //single_extra = 5;
-  //svector = new double[5];
+  single_extra = 5;
+  svector = new double[5];
 
   nmax = 0;
 
@@ -157,6 +157,8 @@ void BondBPMPoly::store_data()
 
       bond_lookup(type, atom->tag[i], atom->tag[j], N, b); // lookup N and b from tables
       
+      //printf("Storing bond i: %d j: %d type: %d N: %f b: %f\n", atom->tag[i], atom->tag[j], type, N, b);
+
       delx = x[i][0] - x[j][0];
       dely = x[i][1] - x[j][1];
       delz = x[i][2] - x[j][2];
@@ -166,6 +168,8 @@ void BondBPMPoly::store_data()
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
       fix_bond_history->update_atom_value(i, m, 0, r);
+      fix_bond_history->update_atom_value(i, m, 1, N);
+      fix_bond_history->update_atom_value(i, m, 2, b);
 
       bondstore[m][0] = r;
       bondstore[m][1] = N;
@@ -190,6 +194,7 @@ void BondBPMPoly::compute(int eflag, int vflag)
   if (!fix_bond_history->stored_flag) {
     fix_bond_history->stored_flag = true;
     store_data();
+    //printf("I stored data \n");
   }
 
   if (hybrid_flag) fix_bond_history->compress_history();
@@ -639,7 +644,7 @@ void BondBPMPoly::read_table(Table *tb, char *file, char *keyword)
       tb->jatomfile[i] = values.next_int();
       tb->Nfile[i] = values.next_double(); 
       tb->bfile[i] = values.next_double();
-      //printf("reading | i: %i, N: %f, b: %f\n", i,tb->nfile[i], tb->bfile[i]);
+      //printf("reading | i: %i, N: %f, b: %f\n", i,tb->Nfile[i], tb->bfile[i]);
     } catch (TokenizerException &e) {
       error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword,
                  i + 1, tb->ninput, e.what(), line);
