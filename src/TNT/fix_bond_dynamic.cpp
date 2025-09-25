@@ -1028,7 +1028,7 @@ void FixBondDynamic::post_integrate()
   N[1] = 2*nremoved;
   N[2] = 2*nbroken;
 
-  if (N[0] > 0) printf("n bonds created %f \n",N[0]);
+  //if (N[0] > 0) printf("n bonds created %f \n",N[0]);
 }
 
 /* ---------------------------------------------------------------------- */
