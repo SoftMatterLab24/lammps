@@ -36,8 +36,8 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), eplastic(nullptr), 
-    aT(nullptr), aT_temp(nullptr), lamc(nullptr), N(nullptr), b(nullptr), id_fix_property_bond(nullptr)
+    BondBPM(_lmp), k0(nullptr), ecrit(nullptr), gamma(nullptr), lamc(nullptr), eplastic(nullptr), 
+    aT(nullptr), aT_temp(nullptr), fcrit(nullptr), id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
@@ -50,7 +50,7 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   ntables = 0;
   tables = nullptr;
 
-  nhistory = 3;
+  nhistory = 5;
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
@@ -84,12 +84,11 @@ BondBPMProny::~BondBPMProny()
     memory->destroy(k0);
     memory->destroy(ecrit);
     memory->destroy(gamma);
+    memory->destroy(lamc);
     memory->destroy(eplastic);
     memory->destroy(aT);
     memory->destroy(aT_temp);
-    memory->destroy(lamc);
-    memory->destroy(N);
-    memory->destroy(b);
+    memory->destroy(fcrit);
   }
 
 }
@@ -119,6 +118,8 @@ double BondBPMProny::store_bond(int n, int i, int j)
   bondstore[n][0] = r;
   bondstore[n][1] = r;
   bondstore[n][2] = 0;
+  bondstore[n][3] = 0; // cannot add bonds if nonlinear !!
+  bondstore[n][4] = 0; // cannot add bonds if nonlinear !!
 
   if (i < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[i]; m++) {
@@ -126,7 +127,9 @@ double BondBPMProny::store_bond(int n, int i, int j)
         fix_bond_history->update_atom_value(i, m, 0, r); // r0
         fix_bond_history->update_atom_value(i, m, 1, r); // rn
         fix_bond_history->update_atom_value(i, m, 2, 0); // ep
-        
+        fix_bond_history->update_atom_value(i, m, 3, 0); // N
+        fix_bond_history->update_atom_value(i, m, 4, 0); // b
+
         type = bond_type[i][m];
         const Table *tb = &tables[tabindex[type]];
         for (int l = 0; l < tb->ninput; l++ ) {
@@ -140,7 +143,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
         dt_temp = dt;
 
         // Internal stress variable
-        fix_bond_history->update_atom_value(i, m, l+3, 0);
+        fix_bond_history->update_atom_value(i, m, l+5, 0);
 
         }  
       }
@@ -153,6 +156,8 @@ double BondBPMProny::store_bond(int n, int i, int j)
         fix_bond_history->update_atom_value(j, m, 0, r); //r0
         fix_bond_history->update_atom_value(j, m, 1, r); //rn
         fix_bond_history->update_atom_value(j, m, 2, 0); //ep
+        fix_bond_history->update_atom_value(j, m, 3, 0); // N
+        fix_bond_history->update_atom_value(j, m, 4, 0); // b
 
         type = bond_type[j][m];
         const Table *tb = &tables[tabindex[type]];
@@ -167,7 +172,7 @@ double BondBPMProny::store_bond(int n, int i, int j)
         dt_temp = dt;
 
         // Internal stress variable
-        fix_bond_history->update_atom_value(j, m, l+3, 0);     
+        fix_bond_history->update_atom_value(j, m, l+5, 0);     
 
         }
       }
@@ -189,6 +194,7 @@ void BondBPMProny::store_data()
 {
   int i, j, n, m, type;
   double delx, dely, delz, r;
+  double N, b;
   double k_temp, eta_temp, exp_j;
   double **x = atom->x;
   double dt = update->dt;
@@ -207,21 +213,28 @@ void BondBPMProny::store_data()
       j = atom->map(atom->bond_atom[i][m]);
       if (j == -1) error->one(FLERR, "Atom missing in BPM bond");
 
+      bond_lookup(type, atom->tag[i], atom->tag[j], N, b); // lookup N and b from tables
+      
       delx = x[i][0] - x[j][0];
       dely = x[i][1] - x[j][1];
       delz = x[i][2] - x[j][2];
 
       // Get closest image in case bonded with ghost
-      domain->minimum_image(delx, dely, delz);
+      domain->minimum_image(FLERR,delx, dely, delz);
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
       fix_bond_history->update_atom_value(i, m, 0, r);
       fix_bond_history->update_atom_value(i, m, 1, r);
       fix_bond_history->update_atom_value(i, m, 2, 0);
+      fix_bond_history->update_atom_value(i, m, 3, N);
+      fix_bond_history->update_atom_value(i, m, 4, b);
 
       bondstore[m][0] = r;
       bondstore[m][1] = r;
       bondstore[m][2] = 0;
+
+      bondstore[m][3] = N;
+      bondstore[m][4] = b;
 
       const Table *tb = &tables[tabindex[type]];
       if (r < EPSILON) {
@@ -240,8 +253,8 @@ void BondBPMProny::store_data()
         dt_temp = dt;
 
         // Internal stress variable
-        fix_bond_history->update_atom_value(i, m, n+3, 0);
-        bondstore[m][n+3] = 0;
+        fix_bond_history->update_atom_value(i, m, n+5, 0);
+        bondstore[m][n+5] = 0;
 
       }
 
@@ -267,7 +280,7 @@ void BondBPMProny::compute(int eflag, int vflag)
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, r0, rn , r0p, rc , rinv,  smooth, fbond, dot;
   double k_temp, eta_temp, exp_j, Hn, term1, term2, term3;
-  double numer, denom, lam, Nb;
+  double N, b, Nb, lam, numer, denom;
 
   ev_init(eflag, vflag);
 
@@ -287,6 +300,7 @@ void BondBPMProny::compute(int eflag, int vflag)
 
   for (n = 0; n < nbondlist; n++) {
 
+    //printf("Processing bond %d of %d\n", n+1, nbondlist);
     // skip bond if already broken
     if (bondlist[n][2] <= 0) {
       continue;
@@ -336,14 +350,14 @@ void BondBPMProny::compute(int eflag, int vflag)
     // update bond length in bondstore
     bondstore[n][1] = r;
     
-    //bond break criterion
-    if ((fabs(e) > ecrit[type]) && break_flag && !nonlinear_flag) {  
+    //bond break criterion //disable for nonlinear
+    if (((fabs(e) > ecrit[type]) && break_flag) && !nonlinear_flag) {  
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
     }
 
-    //plastic calculations - ignored if nonlinear
+    //plastic calculations
     if (plastic_flag) {
       if (e > (ep + eplastic[type])) {
         ep = e - eplastic[type];
@@ -366,24 +380,38 @@ void BondBPMProny::compute(int eflag, int vflag)
     if (normalize_flag) {
       fbond = -k0[type] * (e - ep);
     } else if (nonlinear_flag) {
-      
-      Nb = N[type] * b[type];
+      //if (r > r0p) {
+      //  rc = r0p * lamc[type]; // if bond is in tension
+      //} else {
+      //  rc = 0; // if bond is in compression
+      // }
+      //double lam = (r - r0p) / (rc - r0p);
+      //fbond = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
+
+      // New nonlinear - langevin
+      N = bondstore[n][3];
+      b = bondstore[n][4];
+
+      Nb = N * b;
       lam = r/Nb;
 
-      // Calculate bond force
       numer = lam*(3.0 - pow(lam,2.0));
       denom = 1.0 - pow(lam,2.0);
-      fbond = -k0[type]*numer/denom/b[type];
 
+      fbond = -k0[type]*numer/denom/b;
+
+      // Bond breaking for nonlinear
+      if (fabs(fbond) > fcrit[type]) {
+        bondlist[n][2] = 0;
+        process_broken(i1, i2);
+        continue;
+      }
+
+      if (lam > 0.99) error->warning(FLERR, "POLY bond too long: {} {:.8}", update->ntimestep, lam);
+      if (lam > 2.0) error->one(FLERR, "Bad PRONY bond");
+      
     } else {
       fbond = k0[type] * (r0p - r);
-    }
-
-    // nonlinear bond break criterion
-    if ((lam > lamc[type]) && nonlinear_flag) {  
-      bondlist[n][2] = 0;
-      process_broken(i1, i2);
-      continue;
     }
 
     // rate-dependent part of bond force
@@ -396,7 +424,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       exp_j = tb->expfile[m];
 
       // Get bond history variable
-      Hn = bondstore[n][m+3];
+      Hn = bondstore[n][m+5];
 
       if (normalize_flag) {
         term1 = exp_j * Hn;
@@ -409,7 +437,7 @@ void BondBPMProny::compute(int eflag, int vflag)
       
       // Update bond history variable
       Hn = term1 + term2;
-      bondstore[n][m+3] = Hn;
+      bondstore[n][m+5] = Hn;
     }
 
     delvx = v[i1][0] - v[i2][0];
@@ -456,12 +484,11 @@ void BondBPMProny::allocate()
   memory->create(k0, np1, "bond:k0");
   memory->create(ecrit, np1, "bond:ecrit");
   memory->create(gamma, np1, "bond:gamma");
+  memory->create(lamc,np1,"bond:lamc");
   memory->create(eplastic,np1,"bond:eplastic");
   memory->create(aT,np1,"bond:aT"); 
   memory->create(aT_temp,np1,"bond:aT_temp");
-  memory->create(lamc,np1,"bond:lamc");
-  memory->create(N,np1,"bond:N");
-  memory->create(b,np1,"bond:b");
+  memory->create(fcrit,np1,"bond:fcrit");
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
 
@@ -475,7 +502,7 @@ void BondBPMProny::allocate()
 
 void BondBPMProny::coeff(int narg, char **arg)
 {
-  if (narg < 7) error->all(FLERR, "Incorrect args for bond coefficients");
+  if (!(narg >= 8)) error->all(FLERR, "Incorrect args for bond coefficients");
   if (!allocated) allocate();
 
   int ilo, ihi;
@@ -485,51 +512,53 @@ void BondBPMProny::coeff(int narg, char **arg)
   double ecrit_one = utils::numeric(FLERR, arg[2], false, lmp);
   double gamma_one = utils::numeric(FLERR, arg[3], false, lmp);
 
+  // grab nonlinear coeffs
+  char *file_nl = nullptr;
+  char *keyword_nl = nullptr;
+  double fcrit_one = 0.0;
+
+  if (nonlinear_flag) {
+    try {
+      file_nl = arg[9];
+      keyword_nl = arg[10];
+      fcrit_one = utils::numeric(FLERR, arg[11], false, lmp);
+    } catch (...) {
+      error->all(FLERR, "Incorrect bond coefficient for nonlinear option");
+    }
+  }
+
   tables = (Table *) memory->srealloc(tables, (ntables + 1) * sizeof(Table), "bond:tables");
   Table *tb = &tables[ntables];
   null_table(tb);
-  if (comm->me == 0) read_table(tb, arg[4], arg[5]);
+  if (comm->me == 0) read_table(tb, arg[4], arg[5],file_nl, keyword_nl);
   bcast_table(tb);
 
-  double eplastic_one = utils::numeric(FLERR, arg[6], false, lmp);
+  double lamc_one = utils::numeric(FLERR, arg[6], false, lmp);
+  double eplastic_one = utils::numeric(FLERR, arg[7], false, lmp);
+  double aT_one = 1; 
 
-  // default values
-  double aT_one = 1;
-  double N_one = 1;
-  double b_one = 1;
-  double lamc_one = 1;
+  //if ((nonlinear_flag) && (lamc_one <= 1)) {
+  //  error->all(FLERR, "Incorrect bond coefficient maximum extension must be greater than one");
+  //}
 
   // Parse optional remaining arguments
-  int iarg = 6;
-  while (iarg < narg) {
-    if (temperature_flag) {
-      if (iarg+1 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
-      aT_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
-      iarg += 1;
-    } else if (nonlinear_flag) {
-      if (iarg+3 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
-      N_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
-      b_one = utils::numeric(FLERR, arg[iarg+2], false, lmp);
-      lamc_one = utils::numeric(FLERR, arg[iarg+3], false, lmp);
-      iarg += 3;
-    } else error->all(FLERR,"Illegal fix bond/dynamic command");
-  }
-
-  if ((nonlinear_flag) && (lamc_one > 1)) {
-    error->all(FLERR, "Incorrect bond coefficient critical extension must be less than one");
-  }
+  int iarg = 8;
+  if (temperature_flag) {
+    if (iarg+1 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
+    aT_one = utils::numeric(FLERR, arg[8], false, lmp);
+    iarg += 1;
+  } 
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     k0[i] = k_zero;
     ecrit[i] = ecrit_one;
     gamma[i] = gamma_one;
+    lamc[i] = lamc_one;
     eplastic[i] = eplastic_one;
     aT[i] = aT_one;
     aT_temp[i] = aT_one;
-    N[i] = N_one;
-    b[i] = b_one;
-    lamc[i] = lamc_one;
+    fcrit[i] = fcrit_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
     
@@ -560,7 +589,7 @@ void BondBPMProny::init_style()
 
 void BondBPMProny::settings(int narg, char **arg)
 {
-  nhistory = utils::numeric(FLERR, arg[0], false, lmp) + 3;
+  nhistory = utils::numeric(FLERR, arg[0], false, lmp) + 5;
   
   BondBPM::settings(narg, arg);
 
@@ -601,9 +630,9 @@ void BondBPMProny::settings(int narg, char **arg)
   if (nonlinear_flag && !break_flag)
     error->all(FLERR, "Illegal bond bpm command, must turn on breaking with nonlinear yes option");
 
-  if (nonlinear_flag && normalize_flag)
-    error->all(FLERR, "Illegal bond bpm command, cannot use normalize yes with nonlinear yes option");
-    
+  if (nonlinear_flag && plastic_flag)
+    error->all(FLERR, "Illegal bond bpm command, must turn off plasticity with nonlinear yes option");
+
 }
 
 /* ----------------------------------------------------------------------
@@ -618,12 +647,11 @@ void BondBPMProny::write_restart(FILE *fp)
   fwrite(&k0[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&ecrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&lamc[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&eplastic[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&aT[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&aT_temp[1], sizeof(double), atom->nbondtypes, fp);
-  fwrite(&N[1], sizeof(double), atom->nbondtypes, fp);
-  fwrite(&b[1], sizeof(double), atom->nbondtypes, fp);
-  fwrite(&lamc[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&fcrit[1], sizeof(double), atom->nbondtypes, fp);
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
@@ -643,12 +671,11 @@ void BondBPMProny::read_restart(FILE *fp)
     utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &ecrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &eplastic[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &N[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &b[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &fcrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -658,12 +685,11 @@ void BondBPMProny::read_restart(FILE *fp)
   MPI_Bcast(&k0[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&ecrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&eplastic[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&aT[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&aT_temp[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&N[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&b[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
-  MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&fcrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
@@ -723,7 +749,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   double r0, rn, r0p, rc, ep;
   double k_temp, eta_temp, exp_j, Hn, term1, term2;
   double fel, fint;
-  double Nb,numer,denom,lam;
+  double N, b, Nb, lam, numer, denom;
 
   // rn, ep, hn can be updated, so search bondlist vs. fix_bond_history->get_atom_value()
   tagint tagi = tag[i];
@@ -751,7 +777,7 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     eta_temp = aT[type] * tb->etafile[m];
     exp_j = tb->expfile[m];
 
-    Hn = bondstore[n][m+3];
+    Hn = bondstore[n][m+5];
 
     if (normalize_flag) { 
       term1 = exp_j * Hn;
@@ -777,14 +803,25 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
     fel = -k0[type] * (e - ep);
     fforce += fel;
   } else if (nonlinear_flag) {
-    Nb = N[type] * b[type];
-    lam = r/Nb;
+    //if (r > r0p) {
+    //  rc = r0p * lamc[type]; // if bond is in tension
+    //} else {
+    //  rc = 0; // if bond is in compression
+    //}
+    //double lam = (r - r0p) / (rc - r0p);
+    //fel = -k0[type] * (r - r0p) / ( 2 * (1 - (lam * lam)));
+    //fforce += fel;
 
-    // Calculate bond force
+    // New nonlinear - langevin
+    N = bondstore[n][3]; // This needs to be from the bondstore !!!
+    b = bondstore[n][4];
+
+    Nb = N * b;
+    lam = r/Nb;
     numer = lam*(3.0 - pow(lam,2.0));
     denom = 1.0 - pow(lam,2.0);
-    fel = -k0[type]*numer/denom/b[type];
 
+    fel = -k0[type]*numer/denom/b;
     fforce += fel;
   } else {
     fel = k0[type] * (r0p - r);
@@ -831,8 +868,8 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
 
 void BondBPMProny::null_table(Table *tb)
 {
-  tb->kfile = tb->etafile = tb->expfile = nullptr;
-  tb->k = tb->eta = tb->expj = nullptr;
+  tb->kfile = tb->etafile = tb->expfile = tb->Nfile = tb->bfile = nullptr;
+  tb->k = tb->eta = tb->expj = tb->N = tb->b =  nullptr;
 
 }
 
@@ -843,10 +880,16 @@ void BondBPMProny::free_table(Table *tb)
   memory->destroy(tb->kfile);
   memory->destroy(tb->etafile);
   memory->destroy(tb->expfile);
+  memory->destroy(tb->iatomfile);
+  memory->destroy(tb->jatomfile);
+  memory->destroy(tb->Nfile);
+  memory->destroy(tb->bfile);
 
   memory->destroy(tb->k);
   memory->destroy(tb->eta);
   memory->destroy(tb->expj);
+  memory->destroy(tb->N);
+  memory->destroy(tb->b);
 
 }
 
@@ -854,12 +897,11 @@ void BondBPMProny::free_table(Table *tb)
    read table file, only called by proc 0
 ------------------------------------------------------------------------- */
 
-void BondBPMProny::read_table(Table *tb, char *file, char *keyword)
+void BondBPMProny::read_table(Table *tb, char *file, char *keyword, char *file_nl, char *keyword_nl)
 {
   double dt = update->dt;
   
   TableFileReader reader(lmp, file, "bond");
-
   char *line = reader.find_section_start(keyword);
 
   if (!line) error->one(FLERR, "Did not find keyword {} in table file", keyword);
@@ -901,6 +943,50 @@ void BondBPMProny::read_table(Table *tb, char *file, char *keyword)
 
   printf("Read %i parameters from bond table\n",tb->ninput);
 
+  // if nonlinear option enabled, read additional table parameters
+  if (nonlinear_flag) {
+
+    TableFileReader reader(lmp, file_nl, "bond");
+    char *line_nl = reader.find_section_start(keyword_nl);
+    
+    if (!line_nl) error->one(FLERR, "Did not find keyword {} in nonlinear table file", keyword_nl);
+    // read table values from file
+    // allocate memory for nonlinear
+
+    line_nl = reader.next_line();
+    nonlinear_param_extract(tb, line_nl);
+    memory->create(tb->iatomfile, tb->nninput, "bond:iatomfile");
+    memory->create(tb->jatomfile, tb->nninput, "bond:jatomfile");
+    memory->create(tb->Nfile, tb->nninput, "bond:Nfile");
+    memory->create(tb->bfile, tb->nninput, "bond:bfile");
+
+    // need the new file name and keyword
+
+    int r0idx = -1;
+
+    reader.skip_line();
+    for (int i = 0; i < tb->nninput; i++) {
+      line_nl = reader.next_line();
+      if (!line_nl)
+      error->one(FLERR, "Data missing when parsing bond table '{}' line {} of {}.", keyword_nl, i + 1,
+                 tb->nninput);
+      try {
+        ValueTokenizer values(line_nl);
+        values.next_int();
+        tb->iatomfile[i] = values.next_int(); 
+        tb->jatomfile[i] = values.next_int();
+        tb->Nfile[i] = values.next_double(); 
+        tb->bfile[i] = values.next_double();
+
+      } catch (TokenizerException &e) {
+        error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword_nl,
+                   i + 1, tb->nninput, e.what(), line_nl);
+      }
+    }
+
+    printf("Read parameters for %i bonds from nonlinear bond table\n",tb->nninput);
+  }
+
 }
 
 /* ----------------------------------------------------------------------
@@ -937,9 +1023,42 @@ void BondBPMProny::param_extract(Table *tb, char *line)
   
 }
 
+/* ----------------------------------------------------------------------
+   extract attributes for nonlinear parameter line in table section
+   format of line: N value FP fplo fphi EQ r0
+   N is required, other params are optional
+------------------------------------------------------------------------- */
+
+void BondBPMProny::nonlinear_param_extract(Table *tb, char *line_nl)
+{
+  tb->nninput = 0;
+
+  try {
+    ValueTokenizer values(line_nl);
+
+    while (values.has_next()) {
+      std::string word = values.next_string();
+
+      if (word == "N") {
+        tb->nninput = values.next_int();
+      } else {
+        error->one(FLERR, "Unknown keyword {} in bond table parameters", word);
+      }
+    }
+  } catch (TokenizerException &e) {
+    error->one(FLERR, e.what());
+  }
+
+  if (tb->nninput == 0) error->one(FLERR, "Bond table parameters did not set N");
+
+  //if (!(tb->ninput == nhistory - 3)) error->one(FLERR, "Mismatched args for bond table parameter N");
+  //if (tb->ninput > nhistory - 3) error->one(FLERR, "New element exceeded elements per bond in table file");
+  
+}
+
 /* ---------------------------------------------------------------------- */
 
- void BondBPMProny::update_table(int type)
+void BondBPMProny::update_table(int type)
 {   
   double dt = update->dt;
   double k_temp, eta_temp, exp_j;
@@ -956,6 +1075,24 @@ void BondBPMProny::param_extract(Table *tb, char *line)
   aT_temp[type] = aT[type]; 
 }
 
+/* ---------------------------------------------------------------------- */
+
+void BondBPMProny::bond_lookup(int type, int i, int j, double &N, double &b)
+{
+  int iatom, jatom;
+  const Table *tb = &tables[tabindex[type]];
+
+  for (int n = 0; n < tb->nninput; n++) {
+    iatom = tb->iatomfile[n];
+    jatom = tb->jatomfile[n];
+    if ((iatom == i && jatom == j) || (iatom == j && jatom == i)) {
+      N = tb->Nfile[n];
+      b = tb->bfile[n];
+      return; 
+    }
+  }
+}
+
 /* ----------------------------------------------------------------------
    broadcast read-in table info from proc 0 to other procs
    this function communicates these values in Table:
@@ -965,6 +1102,7 @@ void BondBPMProny::param_extract(Table *tb, char *line)
 void BondBPMProny::bcast_table(Table *tb) // *UPDATED
 {
   MPI_Bcast(&tb->ninput, 1, MPI_INT, 0, world);
+  MPI_Bcast(&tb->nninput, 1, MPI_INT, 0, world);
   MPI_Bcast(&tb->r0, 1, MPI_DOUBLE, 0, world);
 
   int me;
@@ -973,11 +1111,19 @@ void BondBPMProny::bcast_table(Table *tb) // *UPDATED
     memory->create(tb->kfile, tb->ninput, "bond:kfile");
     memory->create(tb->etafile, tb->ninput, "bond:etafile");
     memory->create(tb->expfile, tb->ninput, "bond:expfile");
+    memory->create(tb->iatomfile, tb->nninput, "bond:iatomfile");
+    memory->create(tb->jatomfile, tb->nninput, "bond:jatomfile");
+    memory->create(tb->Nfile, tb->nninput, "bond:Nfile");
+    memory->create(tb->bfile, tb->nninput, "bond:bfile");
   }
 
   MPI_Bcast(tb->kfile, tb->ninput, MPI_DOUBLE, 0, world);
   MPI_Bcast(tb->etafile, tb->ninput, MPI_DOUBLE, 0, world);
   MPI_Bcast(tb->expfile, tb->ninput, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tb->iatomfile, tb->nninput, MPI_INT, 0, world);
+  MPI_Bcast(tb->jatomfile, tb->nninput, MPI_INT, 0, world);
+  MPI_Bcast(tb->Nfile, tb->nninput, MPI_DOUBLE, 0, world);
+  MPI_Bcast(tb->bfile, tb->nninput, MPI_DOUBLE, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */

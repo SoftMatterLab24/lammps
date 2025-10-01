@@ -44,21 +44,21 @@ class BondBPMProny : public BondBPM {
   //void unpack_reverse_comm(int, int *, double *) override;
 
  protected:
-  double *k0, *ecrit, *gamma, *lamc, *eplastic, *aT, *N, *b, *fcrit;
+  double *k0, *ecrit, *gamma, *lamc, *eplastic, *aT, *fcrit;
   int smooth_flag, normalize_flag, nonlinear_flag, plastic_flag, temperature_flag;
 
   int index_vol, index_vol0, nmax;
   char *id_fix_property_bond;
-  double *len_current, **H;
   double *aT_temp;
   double dt_temp;
 
   struct Table {
-   int ninput, fpflag;
+   int ninput, nninput, fpflag;
+   int *iatomfile, *jatomfile;
    double fplo, fphi, r0;
    double lo, hi;
-   double *kfile, *etafile, *expfile;
-   double *k, *eta, *expj;
+   double *kfile, *etafile, *expfile, *Nfile, *bfile;
+   double *k, *eta, *expj, *N, *b;
   };
 
   int tabstyle, tablength, ntables, *tabindex;
@@ -70,11 +70,13 @@ class BondBPMProny : public BondBPM {
 
   void null_table(Table *);
   void free_table(Table *);
-  void read_table(Table *, char *, char *);
+  void read_table(Table *, char *, char *, char *, char *);
   void bcast_table(Table *);
   
   void param_extract(Table *, char *);
+  void nonlinear_param_extract(Table *, char *);
   void update_table(int);
+  void bond_lookup(int, int, int, double &, double &);
 };
 
 }    // namespace LAMMPS_NS
