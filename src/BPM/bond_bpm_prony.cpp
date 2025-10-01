@@ -212,7 +212,7 @@ void BondBPMProny::store_data()
       delz = x[i][2] - x[j][2];
 
       // Get closest image in case bonded with ghost
-      domain->minimum_image(delx, dely, delz);
+      domain->minimum_image(FLERR, delx, dely, delz);
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
       fix_bond_history->update_atom_value(i, m, 0, r);
@@ -500,17 +500,17 @@ void BondBPMProny::coeff(int narg, char **arg)
   double lamc_one = 1;
 
   // Parse optional remaining arguments
-  int iarg = 6;
+  int iarg = 7;
   while (iarg < narg) {
     if (temperature_flag) {
       if (iarg+1 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
-      aT_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
+      aT_one = utils::numeric(FLERR, arg[iarg], false, lmp);
       iarg += 1;
     } else if (nonlinear_flag) {
       if (iarg+3 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
-      N_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
-      b_one = utils::numeric(FLERR, arg[iarg+2], false, lmp);
-      lamc_one = utils::numeric(FLERR, arg[iarg+3], false, lmp);
+      N_one = utils::numeric(FLERR, arg[iarg], false, lmp);
+      b_one = utils::numeric(FLERR, arg[iarg+1], false, lmp);
+      lamc_one = utils::numeric(FLERR, arg[iarg+2], false, lmp);
       iarg += 3;
     } else error->all(FLERR,"Illegal fix bond/dynamic command");
   }
@@ -603,7 +603,7 @@ void BondBPMProny::settings(int narg, char **arg)
 
   if (nonlinear_flag && normalize_flag)
     error->all(FLERR, "Illegal bond bpm command, cannot use normalize yes with nonlinear yes option");
-    
+
 }
 
 /* ----------------------------------------------------------------------
