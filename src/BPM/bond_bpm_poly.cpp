@@ -51,8 +51,8 @@ BondBPMPoly::BondBPMPoly(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_POLY");
 
-  single_extra = 5;
-  svector = new double[5];
+  single_extra = 2;
+  svector = new double[2];
 
   nmax = 0;
 
@@ -570,8 +570,8 @@ double BondBPMPoly::single(int type, double rsq, int i, int j, double &fforce)
 
   // set single_extra quantities
 
-  //svector[0] = r0;
-  //svector[1] = (1.0 + ep) * r0;
+  svector[0] = N;
+  svector[1] = b;
   //svector[2] = fel;
   //svector[3] = fint;
   //svector[4] = Hn;
