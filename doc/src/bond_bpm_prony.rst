@@ -9,6 +9,7 @@ Syntax
 .. code-block:: LAMMPS
 
    bond_style bpm/prony N keyword value attribute1 attribute2 ...
+
 * N = allocate history variables for N Mawell elements
 * optional keyword =  *store/local* or *overlay/pair* or *smooth* or *normalize* or *break* or *plastic* or *nonlinear* or *temp/shift*
 
@@ -304,8 +305,8 @@ However, the single() function also calculates 4 additional quantities. The firs
 to bond lengths, including the reference state :math:`r_0` and equlibrium state :math:`r_{eq}`
 if the *plastic* option is utilized. If *plastic* = *no* then the equlibrium state 
 :math:`r_{eq}` will equal the reference state :math:`r_0`.
-The next 2 quantites (3-4) are the split elastic :math:`F_E`
-and viscoelastic :math:`H_D` forces respectively.
+The next 2 quantites (3-4) are the split elastic :math:`F_{el}`
+and viscoelastic :math:`H_d` forces respectively.
 
 These extra quantity can be accessed by the
 :doc:`compute bond/local <compute_bond_local>` command as *b1*, *b2*, ..., *b4* \.
