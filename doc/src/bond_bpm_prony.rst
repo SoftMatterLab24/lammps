@@ -78,7 +78,7 @@ This bond style only applies central-body forces which conserve the
 translational and rotational degrees of freedom of a bonded set of
 particles. The bond force follows a linear viscoelastic formulation based 
 on a generalized Maxwell element, as outlined in :ref:`(Kaliske) <Kaliske1>`. 
-The bond force is comprised of
+The bond force has a magnitude of
 
 .. math::
 
@@ -121,7 +121,7 @@ Bonds will break at a strain of :math:`\epsilon_c`.  This is done by setting
 the bond type to 0 such that forces are no longer computed.
 
 An additional damping force is applied to the bonded
-particles.  This forces is proportional to the difference in the
+particles.  This force is proportional to the difference in the
 normal velocity of particles using a similar construction as
 dissipative particle dynamics :ref:`(Groot) <Groot4>`:
 
@@ -161,7 +161,7 @@ to *break no* can also be attained by setting an arbitrarily high value of
 :math:`\epsilon_c`. One cannot use *break no* with *smooth yes*.
 
 The *plastic* keyword toggles whether the elastic element is allowed to plastically
-deform as done by :doc:`bpm/spring/plastic <bond_bpm+spring_plastic>`. If set to *yes* the elastic
+deform as done by :doc:`bpm/spring/plastic <bond_bpm_spring_plastic>`. If set to *yes* the elastic
 force has a magnitude of
 
 .. math::
@@ -181,7 +181,7 @@ bonds approach a critcal stretch :math:`\lambda_{c}`.
 If set to *yes* the elastic force has a magnitude of
 
 .. math::
-   F_{el} = k_0 (r - r_0)\bigl[ \frac{1}{1-\lambda^{2}} \bigr]
+   F_{el} = k_0 (r - r_0)\left[ \frac{1}{1-\lambda^{2}} \right]
 
 where :math:`\lambda = (r - r_{0})/(r_{c}-r_{0})` is the stretch ratio with
 :math:`r_{0}` the reference bond length. The critical length :math:`r_{c}` in tension 
@@ -193,13 +193,13 @@ The *temp/shift* keyword toggles whether the shift factor is used. This multipli
 adjusts the viscoelastic timescale as
 
 .. math::
-   eta_m = a_T eta^0_m
+   \eta_m = a_T \eta^0_m
 
-where :math:`eta_m^0` are the viscosities of the Maxwell elements as specified in 
+where :math:`\eta_m^0` are the viscosities of the Maxwell elements as specified in 
 the tabulated file, and :math:`eta_m` are the shifted viscosities used during a simulation.
 This can be used to essentially freeze relaxation of the internal stress during loading for
 instance. Alternatively, the shift factor :math:`a_T` is accessible by the
-:doc:`fix_adapt <fix adapt>` command which allows :math:`a_T` to be modified continuously
+:doc:`fix_adapt <fix_adapt>` command which allows :math:`a_T` to be modified continuously
 during a simulation.
 
 The following coefficients must be defined for each bond type via the
@@ -348,14 +348,6 @@ The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *
 
 **(Kaliske)** Kaliske and Rothert, Comput. Mech., 19, 228-239 (1997).
 
-.. _fragment-Clemmer:
-
-**(Clemmer)** Clemmer and Robbins, Phys. Rev. Lett. (2022).
-
 .. _Groot4:
 
 **(Groot)** Groot and Warren, J Chem Phys, 107, 4423-35 (1997).
-
-.. _multibody-Clemmer:
-
-**(Clemmer2)** Clemmer, Monti, Lechman, Soft Matter, 20, 1702 (2024).
