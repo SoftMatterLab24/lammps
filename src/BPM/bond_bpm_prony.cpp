@@ -54,8 +54,8 @@ BondBPMProny::BondBPMProny(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
-  single_extra = 5;
-  svector = new double[5];
+  single_extra = 4;
+  svector = new double[4];
 
   nmax = 0;
 
@@ -781,7 +781,6 @@ double BondBPMProny::single(int type, double rsq, int i, int j, double &fforce)
   svector[1] = (1.0 + ep) * r0;
   svector[2] = fel;
   svector[3] = fint;
-  svector[4] = Hn;
 
   return 0.0;
 }
