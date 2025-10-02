@@ -196,7 +196,7 @@ adjusts the viscoelastic timescale as
    \eta_m = a_T \eta^0_m
 
 where :math:`\eta_m^0` are the viscosities of the Maxwell elements as specified in 
-the tabulated file, and :math:`eta_m` are the shifted viscosities used during a simulation.
+the tabulated file, and :math:`\eta_m` are the shifted viscosities used during a simulation.
 This can be used to essentially freeze relaxation of the internal stress during loading for
 instance. Alternatively, the shift factor :math:`a_T` is accessible by the
 :doc:`fix_adapt <fix_adapt>` command which allows :math:`a_T` to be modified continuously
