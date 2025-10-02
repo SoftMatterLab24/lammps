@@ -66,7 +66,7 @@ Description
 """""""""""
 
 The *bpm/prony* bond style computes forces based on
-deviations from the initial reference state of the two atoms and the strain history. The
+deviations from the initial reference state of the two atoms, strain and stress history. The
 reference length :math:`r_0` is stored by each bond when it is first computed in
 the setup of a run. Initially, the previous length of the bond :math:`r^{t-1}`
 is set equal to :math:`r_0` but evolves during the run. Data is then preserved across
@@ -81,16 +81,16 @@ The bond force is comprised of
 
 .. math::
 
-   F = w (F_{E} + H_D)
+   F = w (F_{el} + H_d)
 
-where :math:`F_{E}` is the force contribution from the rate-independent
-elastic element, and :math:`H_{D}` is the contribution from the rate-dependent 
+where :math:`F_{el}` is the force contribution from the rate-independent
+elastic element, and :math:`H_{d}` is the contribution from the rate-dependent 
 viscoelastic (Maxwell) elements, and :math:`w` is an optional smoothing factor discussed below.
 The elastic force has a magnitude of
 
 .. math::
 
-   F_E = k_0 (r - r_0)
+   F_{el} = k_0 (r - r_0)
 
 where :math:`k_0` is a stiffness, :math:`r` is the current distance
 and :math:`r_0` is the initial distance between the two particles.
@@ -98,7 +98,7 @@ The viscoelastic force has a magnitude of
 
 .. math::
 
-   H_D = \sum_{j=1}^{n} h_j^t
+   H_{d} = \sum_{j=1}^{n} h_j^t
 
 where the total viscoelastic force is the sum of :math:`j = 1` to :math:`n` 
 Maxwell elements. The force contributed by each :math:`j`-th Maxwell element
@@ -126,7 +126,7 @@ dissipative particle dynamics :ref:`(Groot) <Groot4>`:
 
 .. math::
 
-   F_D = - \gamma w (\hat{r} \bullet \vec{v})
+   F_d = - \gamma w (\hat{r} \bullet \vec{v})
 
 where :math:`\gamma` is the damping strength, :math:`\hat{r}` is the
 radial normal vector, and :math:`\vec{v}` is the velocity difference
@@ -164,7 +164,7 @@ deform as done by :doc:`bpm/spring/plastic <bond_bpm+spring_plastic>`. If set to
 force has a magnitude of
 
 .. math::
-   F_{E} = k_0 (r - r_{eq})
+   F_{el} = k_0 (r - r_{eq})
 
 where :math:`r_{eq}` is the equlibrium bond length.
 If the bond stretches beyond a strain of :math:`\epsilon_p` in compression or extension, 
@@ -180,7 +180,7 @@ bonds approach a critcal stretch :math:`\lambda_{c}`.
 If set to *yes* the elastic force has a magnitude of
 
 .. math::
-   F_{E} = k_0 (r - r_0)\bigl[ \frac{1}{1-\lambda^{2}} \bigr]
+   F_{el} = k_0 (r - r_0)\bigl[ \frac{1}{1-\lambda^{2}} \bigr]
 
 where :math:`\lambda = (r - r_{0})/(r_{c}-r_{0})` is the stretch ratio with
 :math:`r_{0}` the reference bond length. The critical length :math:`r_{c}` in tension 
