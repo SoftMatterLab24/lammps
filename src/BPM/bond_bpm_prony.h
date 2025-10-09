@@ -47,16 +47,14 @@ class BondBPMProny : public BondBPM {
   double *k0, *ecrit, *gamma, *lamc, *eplastic, *aT, *N, *b, *fcrit;
   int smooth_flag, normalize_flag, nonlinear_flag, plastic_flag, temperature_flag;
 
-  int index_vol, index_vol0, nmax;
+  int nmax;
   char *id_fix_property_bond;
-  double *len_current, **H;
   double *aT_temp;
   double dt_temp;
 
   struct Table {
-   int ninput, fpflag;
-   double fplo, fphi, r0;
-   double lo, hi;
+   int ninput;
+   double r0;
    double *kfile, *etafile, *expfile;
    double *k, *eta, *expj;
   };

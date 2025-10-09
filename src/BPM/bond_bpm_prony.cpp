@@ -627,6 +627,23 @@ void BondBPMProny::write_restart(FILE *fp)
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
+  fwrite(&ntables, sizeof(int), 1, fp);
+  fwrite(&nhistory, sizeof(int), 1, fp);
+
+  for (int t = 0; t < ntables; t++) {
+    Table &tb = tables[t];
+
+    // write header: ninput and r0
+    fwrite(&tb.ninput, sizeof(int), 1, fp);
+    fwrite(&tb.r0, sizeof(double), 1, fp);
+
+    // pack kfile and etafile sequentially as doubles
+    // first kfile
+    if (tb.ninput > 0) {
+      fwrite(tb.kfile, sizeof(double), tb.ninput, fp);
+      fwrite(tb.etafile, sizeof(double), tb.ninput, fp);
+    }
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -652,6 +669,8 @@ void BondBPMProny::read_restart(FILE *fp)
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &ntables, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &nhistory, sizeof(int), 1, fp, nullptr, error);
     
   }
 
@@ -667,6 +686,50 @@ void BondBPMProny::read_restart(FILE *fp)
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
+  MPI_Bcast(&ntables, 1, MPI_INT, 0, world);
+  MPI_Bcast(&nhistory, 1, MPI_INT, 0, world);
+
+  // allocate tables array on all procs
+  tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
+
+  // Read tables written by write_restart
+  if (comm->me == 0) {
+    utils::sfread(FLERR, &ntables, sizeof(int), 1, fp, nullptr, error);
+  }
+  MPI_Bcast(&ntables, 1, MPI_INT, 0, world);
+
+  // allocate tables array on all procs
+  if (ntables > 0) {
+    tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
+  }
+
+  for (int t = 0; t < ntables; t++) {
+    Table *tb = &tables[t];
+    null_table(tb);
+
+    int ninput_local = 0;
+    double r0_local = 0.0;
+
+    // read header: ninput and r0
+    if (comm->me == 0) {
+      utils::sfread(FLERR, &ninput_local, sizeof(int), 1, fp, nullptr, error);
+      utils::sfread(FLERR, &r0_local, sizeof(double), 1, fp, nullptr, error);
+
+      tb->ninput = ninput_local;
+      tb->r0 = r0_local;
+
+      tb->kfile = nullptr; tb->etafile = nullptr; tb->expfile = nullptr;
+      memory->create(tb->kfile, tb->ninput, "bond:kfile");
+      memory->create(tb->etafile, tb->ninput, "bond:etafile");
+      memory->create(tb->expfile, tb->ninput, "bond:expfile");
+      utils::sfread(FLERR, tb->kfile, sizeof(double), tb->ninput, fp, nullptr, error);
+      utils::sfread(FLERR, tb->etafile, sizeof(double), tb->ninput, fp, nullptr, error);
+
+      for (int i = 0; i < tb->ninput; i++) tb->expfile[i] = 0.0;
+    }
+    
+    bcast_table(tb);
+  }
 
   for (int i = 1; i <= atom->nbondtypes; i++) setflag[i] = 1;
 }
