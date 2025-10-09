@@ -46,11 +46,11 @@ class BondBPMPoly : public BondBPM {
   double *k0, *fcrit, *gamma;
   int smooth_flag, normalize_flag;
 
-  int index_vol, index_vol0, nmax;
+  int nmax;
   char *id_fix_property_bond;
 
   struct Table {
-   int ninput, fpflag;
+   int ninput;
    int *iatomfile, *jatomfile;
    double r0;
    double lo, hi;

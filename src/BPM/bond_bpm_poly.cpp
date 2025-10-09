@@ -429,6 +429,23 @@ void BondBPMPoly::write_restart(FILE *fp)
   
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
+  fwrite(&ntables, sizeof(int), 1, fp);
+  fwrite(&nhistory, sizeof(int), 1, fp);
+
+  // Write tables
+  for (int t = 0; t < ntables; t++) {
+    Table &tb = tables[t];
+
+    fwrite(&tb.ninput, sizeof(int), 1, fp);
+    fwrite(&tb.r0, sizeof(double), 1, fp);
+
+    fwrite(tb.iatomfile, sizeof(int), tb.ninput, fp);
+    fwrite(tb.jatomfile, sizeof(int), tb.ninput, fp);
+    fwrite(tb.Nfile, sizeof(double), tb.ninput, fp);
+    fwrite(tb.bfile, sizeof(double), tb.ninput, fp);
+  }
+    
+
 }
 
 /* ----------------------------------------------------------------------
@@ -448,6 +465,8 @@ void BondBPMPoly::read_restart(FILE *fp)
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &ntables, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &nhistory, sizeof(int), 1, fp, nullptr, error);
     
   }
 
@@ -457,6 +476,34 @@ void BondBPMPoly::read_restart(FILE *fp)
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
+  MPI_Bcast(&ntables, 1, MPI_INT, 0, world);
+  MPI_Bcast(&nhistory, 1, MPI_INT, 0, world);
+
+  // allocate tables array on all procs
+  tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
+
+  for (int t = 0; t < ntables; t++) {
+    Table *tb = &tables[t];
+    null_table(tb);
+
+    if (comm->me == 0) {
+      utils::sfread(FLERR, &tb->ninput, sizeof(int), 1, fp, nullptr, error);
+      utils::sfread(FLERR, &tb->r0, sizeof(double), 1, fp, nullptr, error);
+
+      tb->iatomfile = nullptr; tb->jatomfile = nullptr; tb->Nfile = nullptr; tb->bfile = nullptr;
+      memory->create(tb->iatomfile, tb->ninput, "bond:iatomfile");
+      memory->create(tb->jatomfile, tb->ninput, "bond:jatomfile");
+      memory->create(tb->Nfile, tb->ninput, "bond:Nfile");
+      memory->create(tb->bfile, tb->ninput, "bond:bfile");
+
+      utils::sfread(FLERR, tb->iatomfile, sizeof(int), tb->ninput, fp, nullptr, error);
+      utils::sfread(FLERR, tb->jatomfile, sizeof(int), tb->ninput, fp, nullptr, error);
+      utils::sfread(FLERR, tb->Nfile, sizeof(double), tb->ninput, fp, nullptr, error);
+      utils::sfread(FLERR, tb->bfile, sizeof(double), tb->ninput, fp, nullptr, error);
+    }
+    bcast_table(tb);
+  }
+
 
   for (int i = 1; i <= atom->nbondtypes; i++) setflag[i] = 1;
 }
