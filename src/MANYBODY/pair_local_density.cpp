@@ -214,13 +214,14 @@ void PairLocalDensity::compute(int eflag, int vflag)
 
       for (k = 0; k < nLD; k++) {
         if (rsq < lowercutsq[k]) {
-             phi = 1.0;
+             phi = 1.0/0.47;
         }
           else if (rsq > uppercutsq[k]) {
-             phi = 0.0;
+             phi = 0.0/0.47;
         }
           else {
-             phi = c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq));
+             phi = (c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq)))/0.47;
+            // phi = 1.0;
         }
         localrho[k][i] += (phi * b[k][jtype]);
 
@@ -231,6 +232,14 @@ void PairLocalDensity::compute(int eflag, int vflag)
             localrho[k][j] += (phi * b[k][itype]);
         }
       }
+
+      // for (k = 0; k < nLD; k++) {
+      //   localrho[k][i] += 1;
+      //   if (newton_pair || j<nlocal) {
+      //     localrho[k][j] += 1;
+      //   }
+      // }
+
     }
   }
 
@@ -316,6 +325,7 @@ void PairLocalDensity::compute(int eflag, int vflag)
         for (k = 0; k < nLD; k++) {
             if (rsq >= lowercutsq[k] && rsq < uppercutsq[k]) {
                dphi = rsq * (2.0*c2[k] + rsq * (4.0*c4[k] + 6.0*c6[k]*rsq));
+              //  dphi = -1.0;
                fpair += -(a[k][itype]*b[k][jtype]*fp[k][i] + a[k][jtype]*b[k][itype]*fp[k][j]) * dphi;
             }
         }
@@ -382,12 +392,12 @@ void PairLocalDensity::coeff(int narg, char **arg)
   int i, j;
   if (!allocated) allocate();
 
-  if (narg != 3) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
+  if (narg != 3) error->all(FLERR,"Incorrect args for pair coefficients");
 
   // ensure I,J args are * *
 
   if (strcmp(arg[0],"*") != 0 || strcmp(arg[1],"*") != 0)
-    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
+    error->all(FLERR,"Incorrect args for pair coefficients");
 
   // parse LD file
 
@@ -409,7 +419,7 @@ void PairLocalDensity::coeff(int narg, char **arg)
         count++;
       }
     }
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
 }
 
 /* ----------------------------------------------------------------------
@@ -470,17 +480,23 @@ double PairLocalDensity::single(int /* i */, int /* j */, int itype, int jtype,
     rsqinv = 1.0/rsq;
     for (k = 0; k < nLD; k++) {
         if (rsq < lowercutsq[k]) {
-             phi = 1.0;
+             phi = 1.0/0.47;
         }
         else if (rsq > uppercutsq[k]) {
-             phi = 0.0;
+             phi = 0.0/0.47;
         }
         else {
-             phi = c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq));
+             phi = (c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq)))/0.47;
+            // phi = 1.0;
         }
         LD[k][1] += (phi * b[k][jtype]);
         LD[k][2] += (phi * b[k][itype]);
     }
+
+    // for (k = 0; k < nLD; k++) {
+    //   LD[k][1] += 1;
+    //   LD[k][2] += 1;
+    // }
 
     for (k = 0; k < nLD; k++) {
         if (a[k][itype]) index = 1;
@@ -515,6 +531,7 @@ double PairLocalDensity::single(int /* i */, int /* j */, int itype, int jtype,
         }
         else {
            dphi = rsq * (2.0*c2[k] + rsq * (4.0*c4[k] + 6.0*c6[k]*rsq));
+          // dphi = -1.0;
         }
         fforce +=  -(a[k][itype]*b[k][jtype]*dFdrho + a[k][jtype]*b[k][itype]*dFdrho) * dphi *rsqinv;
     }
