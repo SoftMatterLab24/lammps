@@ -43,8 +43,8 @@ class BondBPMPoly : public BondBPM {
   //void unpack_reverse_comm(int, int *, double *) override;
 
  protected:
-  double *k0, *fcrit, *gamma;
-  int smooth_flag, normalize_flag;
+  double *k0, *fcrit, *gamma, *lamc;
+  int smooth_flag, normalize_flag, stretch_flag;
 
   int nmax;
   char *id_fix_property_bond;

@@ -36,11 +36,12 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 BondBPMPoly::BondBPMPoly(LAMMPS *_lmp) :
-    BondBPM(_lmp), k0(nullptr), fcrit(nullptr), gamma(nullptr), 
+    BondBPM(_lmp), k0(nullptr), fcrit(nullptr), gamma(nullptr), lamc(nullptr),
     id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
+  stretch_flag = 0;
   normalize_flag = 0;
   writedata = 0;
 
@@ -79,6 +80,7 @@ BondBPMPoly::~BondBPMPoly()
     memory->destroy(k0);
     memory->destroy(fcrit);
     memory->destroy(gamma);
+    memory->destroy(lamc);
   }
 
 }
@@ -267,6 +269,13 @@ void BondBPMPoly::compute(int eflag, int vflag)
     Nb = N * b;
     lam = r/Nb;
 
+    //bond stretch criterion
+    if ((lam > lamc[type]) && break_flag && stretch_flag) {
+      bondlist[n][2] = 0;
+      process_broken(i1, i2);
+      continue;
+    }
+
     // Calculate bond force
 
     numer = lam*(3.0 - pow(lam,2.0));
@@ -279,8 +288,8 @@ void BondBPMPoly::compute(int eflag, int vflag)
     term2 = log(1.0 - pow(lam,2.0));
     ebond = N*(term1 - term2);
 
-    //bond break criterion //disable for nonlinear
-    if ((fabs(fbond) > fcrit[type]) && break_flag) {  
+    //bond break criterion //disable for nonlinear //disable if stretch criterion is used
+    if ((fabs(fbond) > fcrit[type]) && break_flag && !stretch_flag) {  
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
@@ -324,6 +333,7 @@ void BondBPMPoly::allocate()
   memory->create(k0, np1, "bond:k0");
   memory->create(fcrit, np1, "bond:fcrit");
   memory->create(gamma, np1, "bond:gamma");
+  memory->create(lamc, np1, "bond:lamc");
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
 
@@ -353,12 +363,32 @@ void BondBPMPoly::coeff(int narg, char **arg)
   if (comm->me == 0) read_table(tb, arg[4], arg[5]);
   bcast_table(tb);
 
+  // Parse any leftover args
+
+  double lamc_one = 0.95; // default
+  int iarg = 6;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "stretch") == 0) {
+      if (iarg+1 > narg) error->all(FLERR, "Illegal bond bpm command, incorrect args for bond coefficients");
+      lamc_one = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      if (lamc_one <= 0.0 || lamc_one >= 1.0) error->all(FLERR, "Illegal bond bpm command, stretch criterion must be 0 < lamc < 1");
+      stretch_flag = 1;
+      iarg += 2;
+    } else error->all(FLERR,"Incorrect args for bond coefficients");
+  }
+
+  //error checks
+  if (stretch_flag && !break_flag) {
+    error->all(FLERR, "Illegal bond bpm command, must turn on breaking with stretch yes option");
+  }
+   
 
   int count = 0;
   for (int i = ilo; i <= ihi; i++) {
     k0[i] = k_zero;
     fcrit[i] = fcrit_one;
     gamma[i] = gamma_one;
+    lamc[i] = lamc_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
     
@@ -426,6 +456,7 @@ void BondBPMPoly::write_restart(FILE *fp)
   fwrite(&k0[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&fcrit[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&gamma[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&lamc[1], sizeof(double), atom->nbondtypes, fp);
   
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
@@ -462,7 +493,7 @@ void BondBPMPoly::read_restart(FILE *fp)
     utils::sfread(FLERR, &k0[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &fcrit[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-
+    utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &ntables, sizeof(int), 1, fp, nullptr, error);
@@ -473,6 +504,7 @@ void BondBPMPoly::read_restart(FILE *fp)
   MPI_Bcast(&k0[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&fcrit[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&gamma[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
@@ -516,6 +548,7 @@ void BondBPMPoly::write_restart_settings(FILE *fp)
 {
   fwrite(&smooth_flag, sizeof(int), 1, fp);
   fwrite(&normalize_flag, sizeof(int), 1, fp);
+  fwrite(&stretch_flag, sizeof(int), 1, fp);
 
 }
 
@@ -528,10 +561,12 @@ void BondBPMPoly::read_restart_settings(FILE *fp)
   if (comm->me == 0) {
     utils::sfread(FLERR, &smooth_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &normalize_flag, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &stretch_flag, sizeof(int), 1, fp, nullptr, error);
   }
 
   MPI_Bcast(&smooth_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&normalize_flag, 1, MPI_INT, 0, world);
+  MPI_Bcast(&stretch_flag, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
