@@ -283,7 +283,6 @@ void BondBPMGKV::compute(int eflag, int vflag)
   double e, ep, rsq, r, rs, rn , rjp , rinv, smooth, fbond, dot;
   double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
   double term1, term2, term3, numer, denom, lam;
-  double *kj, *exp_j, *alph;
 
   ev_init(eflag, vflag);
 
@@ -351,12 +350,14 @@ void BondBPMGKV::compute(int eflag, int vflag)
     N  = bondstore[n][2];
     b  = bondstore[n][3];
     fn = bondstore[n][4];
+
+    double kj[N], exp_j[N], alph[N];
    
     // update bond length in bondstore
     bondstore[n][1] = r;
     
     //bond break criterion !! update
-    if ((fabs(Ks[type]*rs) > rcrit[type]) && break_flag) {  
+    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag) {  
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
@@ -365,44 +366,61 @@ void BondBPMGKV::compute(int eflag, int vflag)
     term1 = 0.0; term2 = 0.0;
     for (int m = 0; m < N; m++ ) {
 
-        // Get element specific params
-        rjn = bondstore[n][m+5+N];      // ri
-        qn  = bondstore[n][m+5];        // qi
-        eta = bondstore[n][m+5+2*N];    // eta
-        
-        lam = rjn/b;
+      // Get element specific params
+      rjn = bondstore[n][m+5+N];      // ri
+      qn  = bondstore[n][m+5];        // qi
+      eta = bondstore[n][m+5+2*N];    // eta
+      
+      //printf("rjn %f\n",rjn);
+      //printf("qn %f\n",qn);
+      //printf("eta %f\n",eta);
 
-        numer = (pow(lam,2.0)- 3.0);
-        denom = (pow(lam,2.0)- 1.0);
+      lam = rjn/b;
+
+      numer = (pow(lam,2.0)- 3.0);
+      denom = (pow(lam,2.0)- 1.0);
+
+      //printf("kj %f\n",Kj[type]);
+      //printf("kj new %f\n",Kj[type]*numer/denom/pow(b,2.0));
         
-        kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
-        eta_temp = aT[type] * eta;    // viscosity
+      kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
+      
+      eta_temp = aT[type] * eta;    // viscosity
         
-        exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
+      exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
+
+      if (dt/eta_temp < 1e-10){
+        alph[m] = dt; // for small dt/eta alpha -> dt
+      } else {
         alph[m] = eta_temp * (1 - exp_j[m]) / kj[m];
+      }
+      
+      printf("eta %f alph %f\n",dt/eta_temp,alph[m]);
 
-        term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
-        term2 = term2 + (1 - alph[m]) / kj[m];
+      term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
+      term2 = term2 + (1 - alph[m]) / kj[m];
     }
 
     // Compute bond force
-    fbond = (r + term1) / (1 / Ks[type] + term2); // !! check sign
+    fbond = -(r + term1) / (1 / Ks[type] + term2); // !! check sign
 
     // Update bond length and history variables in bondstore
     term3 = 0.0;
     for (m = 0; m < N; m++ ) {
       
         // update history variable
-        qn1 = exp_j[m] * qn + (alph[m] / dt) * (fbond - fn);
+        qn1 = exp_j[m] * qn + (alph[m] / dt) * (-fbond - fn);
+        //printf("alph %f\n",alph[m]);
        
-        rjn1 = (fbond - qn1) / kj[m];
+        rjn1 = (-fbond - qn1) / kj[m];
+        //printf("rjn1 %f\n",rjn1);
         term3 = term3 + rjn1; // total length of KV elements
         
         bondstore[n][m+5]   = qn1;  // qi
         bondstore[n][m+5+N] = rjn1; // ri
     }
 
-    bondstore[n][4] = fbond; // update fn
+    bondstore[n][4] = -fbond; // update fn
     rs = r - term3;          // elastic spring length
     bondstore[n][0] = rs;    // update rs
 
@@ -737,7 +755,7 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   double rs, rn, rjp;
   double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
   double term1, term2, term3, numer, denom, lam;
-  double *kj, *exp_j, *alph;
+  //double *kj, *exp_j, *alph;
 
   // rn, ep, hn can be updated, so search bondlist vs. fix_bond_history->get_atom_value()
   tagint tagi = tag[i];
@@ -757,6 +775,8 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   N  = bondstore[n][2];
   b  = bondstore[n][3];
   fn = bondstore[n][4];
+
+  double kj[N], exp_j[N], alph[N];
    
   fforce = 0;
 
@@ -783,7 +803,7 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   }
   
   // Compute bond force
-  fforce = (r + term1) / (1 / Ks[type] + term2); // !! check sign
+  fforce = -(r + term1) / (1 / Ks[type] + term2); // !! check sign
   
   //double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
