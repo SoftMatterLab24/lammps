@@ -217,7 +217,7 @@ void BondBPMGKV::store_data()
 
         // Compute viscosity and set
         term1 = M_PI*(n+1) / (2*N);
-        eta = 1e-10;//zeta[type] / (4.0*pow(sin(term1),2.0));
+        eta = zeta[type] / (4.0*pow(sin(term1),2.0));
         fix_bond_history->update_atom_value(i, m, n+5+2*N, eta); // eta
         bondstore[m][n+5+2*N] = eta; // eta
 
