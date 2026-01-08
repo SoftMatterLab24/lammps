@@ -123,22 +123,6 @@ double BondBPMGKV::store_bond(int n, int i, int j) // !! This is not updated for
         fix_bond_history->update_atom_value(i, m, 1, r); // rn
         fix_bond_history->update_atom_value(i, m, 2, 0); // ep
         
-        type = bond_type[i][m];
-        const Table *tb = &tables[tabindex[type]];
-        for (int l = 0; l < tb->ninput; l++ ) {
-
-        // Compute exponential terms
-        //k_temp = tb->kfile[l];
-        //eta_temp = aT[type] * tb->etafile[l];
-
-        //exp_j = exp(-dt * k_temp / eta_temp);
-        //tb->expfile[l] = exp_j;
-        //dt_temp = dt;
-
-        // Internal stress variable
-        //fix_bond_history->update_atom_value(i, m, l+3, 0);
-
-        }  
       }
     }
   }
@@ -150,22 +134,6 @@ double BondBPMGKV::store_bond(int n, int i, int j) // !! This is not updated for
         fix_bond_history->update_atom_value(j, m, 1, r); //rn
         fix_bond_history->update_atom_value(j, m, 2, 0); //ep
 
-        type = bond_type[j][m];
-        const Table *tb = &tables[tabindex[type]];
-        for (int l = 0; l < tb->ninput; l++ ) {
-
-        // Compute exponential terms
-        //k_temp = tb->kfile[l];
-        //eta_temp = aT[type] * tb->etafile[l];
-
-        //exp_j = exp(-dt * k_temp / eta_temp);
-        //tb->expfile[l] = exp_j;
-        //dt_temp = dt;
-
-        // Internal stress variable
-        //fix_bond_history->update_atom_value(j, m, l+3, 0);     
-
-        }
       }
     }
   }
@@ -237,12 +205,6 @@ void BondBPMGKV::store_data()
       // Loop through all Kelvin elements and initialize variable 
       for (int n = 0; n < N; n++ ) {
 
-        // Compute exponential terms -> need to do this every compute
-        //k_temp = tb->kfile[n];
-        //eta_temp = aT[type] * tb->etafile[n];
-        
-        //exp_j = exp(-dt * k_temp / eta_temp);
-        //tb->expfile[n] = exp_j;
         dt_temp = dt;
 
         // Set internal viscous history variables to zero
@@ -719,42 +681,10 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   }
    
   // retrieve bond history variables
-  rn = bondstore[n][1]; 
-  N  = bondstore[n][2];
-  b  = bondstore[n][3];
   fn = bondstore[n][4];
 
-  //double kj[N], exp_j[N], alph[N];
-   
-  //fforce = 0;
-
-  //term1 = 0.0; term2 = 0.0;
-  //for (int m = 0; m < N; m++ ) {
-    // Get element specific params
-  //  rjn = bondstore[n][m+5+N];      // ri
-  //  qn  = bondstore[n][m+5];        // qi
-  //  eta = bondstore[n][m+5+2*N];    // eta
-        
-  //  lam = rjn/b;
-
-  //  numer = (pow(lam,2.0)- 3.0);
-  //  denom = (pow(lam,2.0)- 1.0);
-        
-  //  kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
-  //  eta_temp = aT[type] * eta;    // viscosity
-        
-  //  exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
-  //  alph[m] = eta_temp * (1 - exp_j[m]) / kj[m];
-
-  //  term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
-  //  term2 = term2 + (1 - alph[m]) / kj[m];
-  //}
+  fforce = -fn;
   
-  // Compute bond force
-  
-  fforce = -fn;//(r + term1) / (1 / Ks[type] + term2); // !! check sign
-  
-  //printf("Bond force single: %f \n",fforce);
   //double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
   double **x = atom->x;
