@@ -283,7 +283,6 @@ void BondBPMGKV::compute(int eflag, int vflag)
   double e, ep, rsq, r, rs, rn , rjp , rinv, smooth, fs, fbond, dot;
   double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
   double term1, term2, term3, numer, denom, lam;
-  double *kj, *exp_j, *alph;
 
   ev_init(eflag, vflag);
 
@@ -347,7 +346,7 @@ void BondBPMGKV::compute(int eflag, int vflag)
     //e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
     //bond break criterion !! update
-    if ((fabs(Ks[type]*rs) > rcrit[type]) && break_flag) {  
+    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag) {  
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
