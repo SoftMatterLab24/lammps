@@ -255,7 +255,7 @@ void BondBPMGKV::store_data()
 
         // Compute viscosity and set
         term1 = M_PI*(n+1) / (2*N);
-        eta = zeta[type] / (4.0*pow(sin(term1),2.0));
+        eta = 1e-10;//zeta[type] / (4.0*pow(sin(term1),2.0));
         fix_bond_history->update_atom_value(i, m, n+5+2*N, eta); // eta
         bondstore[m][n+5+2*N] = eta; // eta
 
@@ -280,7 +280,7 @@ void BondBPMGKV::compute(int eflag, int vflag)
 
   int i1, i2, itmp, n, m, type, N;
   double delx, dely, delz, delvx, delvy, delvz;
-  double e, ep, rsq, r, rs, rn , rjp , rinv, smooth, fbond, dot;
+  double e, ep, rsq, r, rs, rn , rjp , rinv, smooth, fs, fbond, dot;
   double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
   double term1, term2, term3, numer, denom, lam;
   double *kj, *exp_j, *alph;
@@ -346,15 +346,6 @@ void BondBPMGKV::compute(int eflag, int vflag)
     r = sqrt(rsq);    
     //e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
-    // retrieve bond history variables
-    rn = bondstore[n][1]; // This needs to be after bonds have been initialized
-    N  = bondstore[n][2];
-    b  = bondstore[n][3];
-    fn = bondstore[n][4];
-   
-    // update bond length in bondstore
-    bondstore[n][1] = r;
-    
     //bond break criterion !! update
     if ((fabs(Ks[type]*rs) > rcrit[type]) && break_flag) {  
       bondlist[n][2] = 0;
@@ -362,49 +353,26 @@ void BondBPMGKV::compute(int eflag, int vflag)
       continue;
     }
 
-    term1 = 0.0; term2 = 0.0;
-    for (int m = 0; m < N; m++ ) {
+    // Check stability criterion
+    int stable = 1;
+    for (m = 0; m < tb->ninput; m++ ) {
+      N = bondstore[n][2];
+      b = bondstore[n][3];
+      rjp  = bondstore[n][m+5+N]; 
 
-        // Get element specific params
-        rjn = bondstore[n][m+5+N];      // ri
-        qn  = bondstore[n][m+5];        // qi
-        eta = bondstore[n][m+5+2*N];    // eta
-        
-        lam = rjn/b;
-
-        numer = (pow(lam,2.0)- 3.0);
-        denom = (pow(lam,2.0)- 1.0);
-        
-        kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
-        eta_temp = aT[type] * eta;    // viscosity
-        
-        exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
-        alph[m] = eta_temp * (1 - exp_j[m]) / kj[m];
-
-        term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
-        term2 = term2 + (1 - alph[m]) / kj[m];
+      if (rjp > 0.90*b) {
+        stable = 0;
+        break;
+      }
     }
 
-    // Compute bond force
-    fbond = (r + term1) / (1 / Ks[type] + term2); // !! check sign
-
-    // Update bond length and history variables in bondstore
-    term3 = 0.0;
-    for (m = 0; m < N; m++ ) {
-      
-        // update history variable
-        qn1 = exp_j[m] * qn + (alph[m] / dt) * (fbond - fn);
-       
-        rjn1 = (fbond - qn1) / kj[m];
-        term3 = term3 + rjn1; // total length of KV elements
-        
-        bondstore[n][m+5]   = qn1;  // qi
-        bondstore[n][m+5+N] = rjn1; // ri
+    if (stable) {
+      direct_solve(r, type, n, dt, fs);
+    } else {
+      iter_solve(r, type, n, dt, fs);
     }
 
-    bondstore[n][4] = fbond; // update fn
-    rs = r - term3;          // elastic spring length
-    bondstore[n][0] = rs;    // update rs
+    fbond = -fs;
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
@@ -737,7 +705,6 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   double rs, rn, rjp;
   double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
   double term1, term2, term3, numer, denom, lam;
-  double *kj, *exp_j, *alph;
 
   // rn, ep, hn can be updated, so search bondlist vs. fix_bond_history->get_atom_value()
   tagint tagi = tag[i];
@@ -757,34 +724,38 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   N  = bondstore[n][2];
   b  = bondstore[n][3];
   fn = bondstore[n][4];
+
+  //double kj[N], exp_j[N], alph[N];
    
-  fforce = 0;
+  //fforce = 0;
 
-  term1 = 0.0; term2 = 0.0;
-  for (int m = 0; m < N; m++ ) {
+  //term1 = 0.0; term2 = 0.0;
+  //for (int m = 0; m < N; m++ ) {
     // Get element specific params
-    rjn = bondstore[n][m+5+N];      // ri
-    qn  = bondstore[n][m+5];        // qi
-    eta = bondstore[n][m+5+2*N];    // eta
+  //  rjn = bondstore[n][m+5+N];      // ri
+  //  qn  = bondstore[n][m+5];        // qi
+  //  eta = bondstore[n][m+5+2*N];    // eta
         
-    lam = rjn/b;
+  //  lam = rjn/b;
 
-    numer = (pow(lam,2.0)- 3.0);
-    denom = (pow(lam,2.0)- 1.0);
+  //  numer = (pow(lam,2.0)- 3.0);
+  //  denom = (pow(lam,2.0)- 1.0);
         
-    kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
-    eta_temp = aT[type] * eta;    // viscosity
+  //  kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
+  //  eta_temp = aT[type] * eta;    // viscosity
         
-    exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
-    alph[m] = eta_temp * (1 - exp_j[m]) / kj[m];
+  //  exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
+  //  alph[m] = eta_temp * (1 - exp_j[m]) / kj[m];
 
-    term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
-    term2 = term2 + (1 - alph[m]) / kj[m];
-  }
+  //  term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
+  //  term2 = term2 + (1 - alph[m]) / kj[m];
+  //}
   
   // Compute bond force
-  fforce = (r + term1) / (1 / Ks[type] + term2); // !! check sign
   
+  fforce = -fn;//(r + term1) / (1 / Ks[type] + term2); // !! check sign
+  
+  //printf("Bond force single: %f \n",fforce);
   //double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
   double **x = atom->x;
@@ -995,24 +966,225 @@ void BondBPMGKV::bcast_table(Table *tb) // *UPDATED
   MPI_Bcast(tb->bfile, tb->ninput, MPI_DOUBLE, 0, world);
 }
 
+/* ----------------------------------------------------------------------
+   solvers for bond force given the total bond stretch
+   if below stability limit, use fast direct solve
+   else use slower but more accurate iterative solve
+   
+------------------------------------------------------------------------- */
 
-//void BondBPMGKV::bcast_table(Table *tb) // *UPDATED
-//{
-//  MPI_Bcast(&tb->ninput, 1, MPI_INT, 0, world);
-//  MPI_Bcast(&tb->r0, 1, MPI_DOUBLE, 0, world);
-//
-//  int me;
-//  MPI_Comm_rank(world, &me);
-//  if (me > 0) {
-//    memory->create(tb->kfile, tb->ninput, "bond:kfile");
-//    memory->create(tb->etafile, tb->ninput, "bond:etafile");
-//    memory->create(tb->expfile, tb->ninput, "bond:expfile");
-//  }
+void BondBPMGKV::direct_solve(double r, int type, int n, double dt , double &f)
+{
+  int    m, N;
+  double rs, rn, rj_sum, b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
+  double term1, term2, term3, numer, denom, lam;
+  double fpred, fcor;
 
-//  MPI_Bcast(tb->kfile, tb->ninput, MPI_DOUBLE, 0, world);
-//  MPI_Bcast(tb->etafile, tb->ninput, MPI_DOUBLE, 0, world);
-//  MPI_Bcast(tb->expfile, tb->ninput, MPI_DOUBLE, 0, world);
-//}
+  double **bondstore = fix_bond_history->bondstore;
+
+  // retrieve bond history variables
+  rs = bondstore[n][0];
+  rn = bondstore[n][1];
+  N  = bondstore[n][2];
+  b  = bondstore[n][3];
+  fn = bondstore[n][4];
+
+  double kj[N], exp_j[N], alph[N], qn_pred[N], rj_pred[N];
+   
+  // update bond length in bondstore
+  bondstore[n][1] = r;
+    
+  term1 = 0.0; term2 = 0.0;
+  for (int m = 0; m < N; m++ ) {
+
+    // Get element specific params
+    qn  = bondstore[n][m+5];        // old qi
+    rjn = bondstore[n][m+5+N];      // old ri
+    eta = bondstore[n][m+5+2*N];    // eta
+
+    // update stiffness and exponential terms
+    lam = rjn/b;
+
+    numer = (pow(lam,2.0)- 3.0);
+    denom = (pow(lam,2.0)- 1.0);
+    kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
+    eta_temp = aT[type] * eta;               // viscosity
+
+    exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
+
+    if (dt/eta_temp < 1e-10){
+        alph[m] = 1; // for small dt/eta take limit directly: alpha -> 1
+    } else {
+        alph[m] = (eta_temp / kj[m]) * (1 - exp_j[m]) / dt;
+    }
+
+    term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
+    term2 = term2 + (1 - alph[m]) / kj[m];
+  }
+ 
+  // Compute trial bond force
+  fpred = (r + term1) / (1 / Ks[type] + term2);
+
+  rj_sum = 0.0;
+  for (m = 0; m < N; m++ ) {
+      // update history variable
+      qn1 = exp_j[m] * qn + (alph[m]) * (fpred - fn);
+       
+      rjn1 = (fpred - qn1) / kj[m];
+        
+      qn_pred[m] = qn1;
+      rj_pred[m] = rjn1;
+      rj_sum = rj_sum + rjn1; // total length of KV elements
+  }
+
+  // Corrector step
+  rs = r - rj_sum;
+  fcor = Ks[type] * rs;
+ 
+  for (m = 0; m < N; m++ ) {
+       
+      rjn1 = (fcor - qn1) / kj[m];
+      rjn1 = std::min(rjn1, rj_pred[m]);
+      bondstore[n][m+5]   = qn1;  // qi
+      bondstore[n][m+5+N] = rjn1; // ri
+
+      lam = rjn1/b;
+      numer = (pow(lam,2.0)- 3.0);
+      denom = (pow(lam,2.0)- 1.0);
+      kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
+      
+      qn1 = fcor - rjn1 * kj[m];
+
+      bondstore[n][m+5]   = qn1;  // update qi
+      bondstore[n][m+5+N] = rjn1; // update ri
+  }
+
+  f = fcor; 
+
+  bondstore[n][0] = rs;    // update rs
+  bondstore[n][4] = f;     // update fn
+
+  return;
+}
+
+void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
+{
+  int    m, N;
+  int    iter_max, iter_local_max;
+  double rs, rn, rjp, rj_sum, rj_low, rj_high, rj_mid;
+  double b, lam, eta, eta_temp, qn1, qnp;
+  double fn, f_low, f_high, f_mid;
+  double R, G;
+  double numer, denom;
+  
+  double **bondstore = fix_bond_history->bondstore;
+
+  // retrieve bond history variables
+  rs = bondstore[n][0];
+  rn = bondstore[n][1];
+  N  = bondstore[n][2];
+  b  = bondstore[n][3];
+  fn = bondstore[n][4];
+
+  double kj[N], exp_j[N], alph[N], qn[N], rj_pred[N];
+   
+  // update bond length in bondstore
+  bondstore[n][1] = r;
+
+  // bracket stress
+  f_low = 0.5 * fn;
+  f_high = 1.1 * Ks[type] * rs;
+  
+  // Global bisection for bond force
+  iter_max = 100;
+  for (int iter = 0; iter < iter_max; iter++) {
+    f_mid = 0.5 * (f_low + f_high);
+
+    rj_sum = 0.0;
+    // Solve each KV element length at this trial force
+    for (m = 0; m < N; m++ ) {
+
+      // Get element specific params
+      //qnp  = bondstore[n][m+5];        // old qi
+      rjp  = bondstore[n][m+5+N];      // old ri
+      eta  = bondstore[n][m+5+2*N];    // eta
+
+      // Local bisection for element length
+      iter_local_max = 100;
+
+      // bracket stretch
+      rj_low = 0.95 * rjp;
+      rj_high = b; // max stretch of element
+
+      for (int iter_local = 0; iter_local < iter_local_max; iter_local++) {
+        rj_mid = 0.5 * (rj_low + rj_high);
+
+        // get stiffness
+        lam = rj_mid/b;
+        numer = (pow(lam,2.0)- 3.0);
+        denom = (pow(lam,2.0)- 1.0);
+        kj[m]    = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
+
+        eta_temp = aT[type] * eta;               // viscosity
+
+        // residual
+        G = rj_mid + dt/eta_temp * kj[m] * rj_mid - (rjp + dt/eta_temp*f_mid);
+
+        if (G > 0) {
+          rj_high = rj_mid;
+        } else {
+          rj_low = rj_mid;
+        }
+
+        // Convergence check
+        if (fabs(G) < 1e-6) break;
+      }
+
+      rj_pred[m] = rj_mid; // predicted element length at mid force
+      rj_sum = rj_sum + rj_mid;
+    }
+
+    // Compute residual
+    R = f_mid/Ks[type] + rj_sum - r;
+
+    if (R > 0) {
+      f_high = f_mid;
+    } else {
+      f_low = f_mid;
+    }
+
+    // Convergence check
+    if (fabs(R) < 1e-6) break;
+
+  }
+  
+  // Update bond force and elastic spring length
+  rs = r - rj_sum;
+  f  = f_mid;
+
+  bondstore[n][0] = rs;    // update rs
+  bondstore[n][4] = f;     // update fn
+
+  // Update bond history variables at converged force
+  for (m = 0; m < N; m++ ) {
+
+      // Get element specific params
+      bondstore[n][m+5+N] = rj_pred[m];      // old ri
+      
+      // get stiffness
+      lam = rj_pred[m]/b;
+      numer = (pow(lam,2.0)- 3.0);
+      denom = (pow(lam,2.0)- 1.0);
+      kj[m] = Kj[type]*numer/denom/pow(b,2.0); // new stiffness
+
+      // update history variable
+      qn1 = f_mid - rj_pred[m] * kj[m];
+      bondstore[n][m+5] = qn1;
+  }
+
+  return;
+}
+
 
 /* ---------------------------------------------------------------------- */
 

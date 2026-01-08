@@ -75,6 +75,8 @@ class BondBPMGKV : public BondBPM {
   void param_extract(Table *, char *);
   void update_table(int);
   void bond_lookup(int, int, int, int &, double &);
+  void direct_solve(double, int, int, double, double &);
+  void iter_solve(double, int, int, double, double &);
 };
 
 }    // namespace LAMMPS_NS
