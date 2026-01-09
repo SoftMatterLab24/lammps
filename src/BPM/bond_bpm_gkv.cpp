@@ -122,7 +122,7 @@ double BondBPMGKV::store_bond(int n, int i, int j) // !! This is not updated for
         fix_bond_history->update_atom_value(i, m, 0, r); // rs
         fix_bond_history->update_atom_value(i, m, 1, r); // rn
         fix_bond_history->update_atom_value(i, m, 2, 0); // ep
-        
+
       }
     }
   }
@@ -153,7 +153,7 @@ void BondBPMGKV::store_data()
 {
   int i, j, n, m, type, N;
   double delx, dely, delz, r;
-  double b, fn;
+  double b, fn, fs;
   double term1, eta;
   double **x = atom->x;
   double dt = update->dt;
@@ -183,7 +183,8 @@ void BondBPMGKV::store_data()
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
       // compute initial bond force
-      fn = 0; // for now assume zero initial force
+      //iter_solve(r, type, n, dt, fs);
+      //fn = fs; // for now assume zero initial force
 
       fix_bond_history->update_atom_value(i, m, 0, r); // rs
       fix_bond_history->update_atom_value(i, m, 1, r); // rn
@@ -321,12 +322,13 @@ void BondBPMGKV::compute(int eflag, int vflag)
       b = bondstore[n][3];
       rjp  = bondstore[n][m+5+N]; 
 
-      if (rjp > 0.90*b) {
+      if (rjp > 0.5*b) {
         stable = 0;
         break;
       }
     }
 
+    stable = 0; // Temp disable direct solve
     if (stable) {
       direct_solve(r, type, n, dt, fs);
     } else {
@@ -1021,8 +1023,8 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
   bondstore[n][1] = r;
 
   // bracket stress
-  f_low = 0.5 * fn;
-  f_high = 1.1 * Ks[type] * rs;
+  f_low = 0.5*fn; //0.98 * fn;
+  f_high = 1.1 * fabs(Ks[type] * r);
   
   // Global bisection for bond force
   iter_max = 100;
@@ -1042,7 +1044,7 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
       iter_local_max = 100;
 
       // bracket stretch
-      rj_low = 0.95 * rjp;
+      rj_low = 0; // min stretch of element
       rj_high = b; // max stretch of element
 
       for (int iter_local = 0; iter_local < iter_local_max; iter_local++) {
@@ -1110,7 +1112,7 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
       qn1 = f_mid - rj_pred[m] * kj[m];
       bondstore[n][m+5] = qn1;
   }
-
+  
   return;
 }
 
