@@ -203,23 +203,26 @@ void BondBPMGKV::store_data()
         error->one(FLERR, "Bond reference length too small");
       }
 
-      // Set KV element initial values
-      dt_temp = dt;
+      // Loop through all Kelvin elements and initialize variable 
+      for (int n = 0; n < N; n++ ) {
 
-      // Set internal viscous history variables to zero
-      fix_bond_history->update_atom_value(i, m, 5, 0);    // qi
-      bondstore[m][5] = 0;
+        dt_temp = dt;
 
-      // Set intial lengths of Kelvin-Voigt elements to zero
-      fix_bond_history->update_atom_value(i, m, 6, 0); // ri
-      bondstore[m][6] = 0;
+        // Set internal viscous history variables to zero
+        fix_bond_history->update_atom_value(i, m, n+5, 0);    // qi
+        bondstore[m][n+5] = 0;
 
-      // Compute viscosity and set
-      term1 = M_PI / (2*N);
-      eta = zeta[type] / (4.0*pow(sin(term1),2.0));
-      fix_bond_history->update_atom_value(i, m, 7, eta); // eta
-      bondstore[m][7] = eta; // eta
+        // Set intial lengths of Kelvin-Voigt elements to zero
+        fix_bond_history->update_atom_value(i, m, n+5+N, 0); // ri
+        bondstore[m][n+5+N] = 0;
 
+        // Compute viscosity and set
+        term1 = M_PI*(n+1) / (2*N);
+        eta = zeta[type] / (4.0*pow(sin(term1),2.0));
+        fix_bond_history->update_atom_value(i, m, n+5+2*N, eta); // eta
+        bondstore[m][n+5+2*N] = eta; // eta
+
+      }
     }
   }
   fix_bond_history->post_neighbor();
