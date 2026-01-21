@@ -48,7 +48,7 @@ BondBPMGKV::BondBPMGKV(LAMMPS *_lmp) :
   ntables = 0;
   tables = nullptr;
 
-  nhistory = 3;
+  nhistory = 8;
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_PRONY");
 
@@ -215,8 +215,8 @@ void BondBPMGKV::store_data()
       bondstore[m][6] = 0;
 
       // Compute viscosity and set
-      term1 = M_PI / (2*N);
-      eta = zeta[type] / (4.0*pow(sin(term1),2.0));
+      
+      eta = 2.0 * zeta[type] * N;
       fix_bond_history->update_atom_value(i, m, 7, eta); // eta
       bondstore[m][7] = eta; // eta
 
@@ -314,17 +314,16 @@ void BondBPMGKV::compute(int eflag, int vflag)
 
     // Check stability criterion
     int stable = 1;
-    for (m = 0; m < tb->ninput; m++ ) {
-      N = bondstore[n][2];
-      b = bondstore[n][3];
-      rjp  = bondstore[n][m+5+N]; 
+    
+    N = bondstore[n][2];
+    b = bondstore[n][3];
+    rjp  = bondstore[n][6]; 
 
-      if (rjp > 0.5*b) {
-        stable = 0;
-        break;
-      }
+    if (rjp > 0.75*N*b) {
+      stable = 0;
+      break;
     }
-
+    
     stable = 0; // Temp disable direct solve
     if (stable) {
       direct_solve(r, type, n, dt, fs);
@@ -464,11 +463,10 @@ void BondBPMGKV::init_style()
 
 void BondBPMGKV::settings(int narg, char **arg)
 {
-  nhistory = 3 * utils::numeric(FLERR, arg[0], false, lmp) + 5;
   
   BondBPM::settings(narg, arg);
   int iarg; 
-  for (std::size_t i = 1; i < leftover_iarg.size(); i++) {
+  for (std::size_t i = 0; i < leftover_iarg.size(); i++) {
     iarg = leftover_iarg[i];
     if (strcmp(arg[iarg], "smooth") == 0) {
       if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, missing option for smooth");
@@ -904,7 +902,8 @@ void BondBPMGKV::bcast_table(Table *tb) // *UPDATED
 void BondBPMGKV::direct_solve(double r, int type, int n, double dt , double &f)
 {
   int    m, N;
-  double rs, rn, rj_sum, b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
+  double rs, rn, rj_sum, b, eta, eta_temp, tau, fn, rjn, qn, rjn1, qn1;
+  double kj, exp_j, alph, qn_pred, rj_pred;
   double term1, term2, term3, numer, denom, lam;
   double fpred, fcor;
 
@@ -916,77 +915,68 @@ void BondBPMGKV::direct_solve(double r, int type, int n, double dt , double &f)
   N  = bondstore[n][2];
   b  = bondstore[n][3];
   fn = bondstore[n][4];
-
-  double kj[N], exp_j[N], alph[N], qn_pred[N], rj_pred[N];
    
   // update bond length in bondstore
   bondstore[n][1] = r;
     
   term1 = 0.0; term2 = 0.0;
-  for (int m = 0; m < N; m++ ) {
+  
+  // Get element specific params
+  qn  = bondstore[n][5];     // old qi
+  rjn = bondstore[n][6];     // old ri
+  eta = bondstore[n][7];     // eta
 
-    // Get element specific params
-    qn  = bondstore[n][m+5];        // old qi
-    rjn = bondstore[n][m+5+N];      // old ri
-    eta = bondstore[n][m+5+2*N];    // eta
+  // update stiffness and exponential terms
+  lam = rjn/(N*b);
 
-    // update stiffness and exponential terms
-    lam = rjn/(N*b);
+  numer = (pow(lam,2.0)- 3.0);
+  denom = (pow(lam,2.0)- 1.0);
+  kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
+  eta_temp = aT[type] * eta;                   // viscosity
 
-    numer = (pow(lam,2.0)- 3.0);
-    denom = (pow(lam,2.0)- 1.0);
-    kj[m] = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
-    eta_temp = aT[type] * eta;               // viscosity
+  tau = eta_temp / (2*M_PI*kj);             // Terminal relaxation time
+  exp_j = exp(-dt * kj / eta_temp);      // exponential term
 
-    exp_j[m] = exp(-dt * kj[m] / eta_temp);  // exponential term
-
-    if (dt/eta_temp < 1e-10){
-        alph[m] = 1; // for small dt/eta take limit directly: alpha -> 1
-    } else {
-        alph[m] = (eta_temp / kj[m]) * (1 - exp_j[m]) / dt;
-    }
-
-    term1 = term1 + (qn*exp_j[m] - alph[m]*fn) / kj[m];
-    term2 = term2 + (1 - alph[m]) / kj[m];
+  if (dt/eta_temp < 1e-10){
+    alph = 1; // for small dt/eta take limit directly: alpha -> 1
+  } else {
+    alph = tau * (1 - exp_j) / dt;
   }
+
+  term1 =  (qn*exp_j - alph*fn) / kj;
+  term2 =  (1 - alph) / kj;
  
   // Compute trial bond force
   fpred = (r + term1) / (1 / Ks[type] + term2);
-
-  rj_sum = 0.0;
-  for (m = 0; m < N; m++ ) {
-      // update history variable
-      qn1 = exp_j[m] * qn + (alph[m]) * (fpred - fn);
+ 
+  // update history variable
+  qn1 = exp_j * qn + (alph) * (fpred - fn);
        
-      rjn1 = (fpred - qn1) / kj[m];
+  rjn1 = (fpred - qn1) / kj;
         
-      qn_pred[m] = qn1;
-      rj_pred[m] = rjn1;
-      rj_sum = rj_sum + rjn1; // total length of KV elements
-  }
-
+  qn_pred = qn1;
+  rj_pred = rjn1;
+  rj_sum = rjn1; // total length of KV elements
+  
   // Corrector step
   rs = r - rj_sum;
   fcor = Ks[type] * rs;
  
-  for (m = 0; m < N; m++ ) {
-       
-      rjn1 = (fcor - qn1) / kj[m];
-      rjn1 = std::min(rjn1, rj_pred[m]);
-      bondstore[n][m+5]   = qn1;  // qi
-      bondstore[n][m+5+N] = rjn1; // ri
+  rjn1 = (fcor - qn1) / kj;
+  rjn1 = std::min(rjn1, rj_pred);
+  bondstore[n][5]   = qn1;  // qi
+  bondstore[n][6] = rjn1; // ri
 
-      lam = rjn1/(N*b);
-      numer = (pow(lam,2.0)- 3.0);
-      denom = (pow(lam,2.0)- 1.0);
-      kj[m] = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
+  lam = rjn1/(N*b);
+  numer = (pow(lam,2.0)- 3.0);
+  denom = (pow(lam,2.0)- 1.0);
+  kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
       
-      qn1 = fcor - rjn1 * kj[m];
+  qn1 = fcor - rjn1 * kj;
 
-      bondstore[n][m+5]   = qn1;  // update qi
-      bondstore[n][m+5+N] = rjn1; // update ri
-  }
-
+  bondstore[n][5]   = qn1;  // update qi
+  bondstore[n][6] = rjn1; // update ri
+  
   f = fcor; 
 
   bondstore[n][0] = rs;    // update rs
@@ -1001,6 +991,7 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
   int    iter_max, iter_local_max;
   double rs, rn, rjp, rj_sum, rj_low, rj_high, rj_mid;
   double b, lam, eta, eta_temp, qn1, qnp;
+  double kj, exp_j, alph, qn_pred, rj_pred;
   double fn, f_low, f_high, f_mid;
   double R, G;
   double numer, denom;
@@ -1013,8 +1004,6 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
   N  = bondstore[n][2];
   b  = bondstore[n][3];
   fn = bondstore[n][4];
-
-  double kj[N], exp_j[N], alph[N], qn[N], rj_pred[N];
    
   // update bond length in bondstore
   bondstore[n][1] = r;
@@ -1029,48 +1018,46 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
     f_mid = 0.5 * (f_low + f_high);
 
     rj_sum = 0.0;
-    // Solve each KV element length at this trial force
-    for (m = 0; m < N; m++ ) {
+    
+    // Get element specific params
+    //qnp  = bondstore[n][m+5];        // old qi
+    rjp  = bondstore[n][6];      // old ri
+    eta  = bondstore[n][7];    // eta
 
-      // Get element specific params
-      //qnp  = bondstore[n][m+5];        // old qi
-      rjp  = bondstore[n][m+5+N];      // old ri
-      eta  = bondstore[n][m+5+2*N];    // eta
+    // Local bisection for element length
+    iter_local_max = 100;
 
-      // Local bisection for element length
-      iter_local_max = 100;
+    // bracket stretch
+    rj_low = 0; // min stretch of element
+    rj_high = N*b; // max stretch of element
 
-      // bracket stretch
-      rj_low = 0; // min stretch of element
-      rj_high = N*b; // max stretch of element
+    for (int iter_local = 0; iter_local < iter_local_max; iter_local++) {
+      rj_mid = 0.5 * (rj_low + rj_high);
 
-      for (int iter_local = 0; iter_local < iter_local_max; iter_local++) {
-        rj_mid = 0.5 * (rj_low + rj_high);
+      // get stiffness
+      lam = rj_mid/(N*b);
+      numer = (pow(lam,2.0)- 3.0);
+      denom = (pow(lam,2.0)- 1.0);
+      kj  = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
 
-        // get stiffness
-        lam = rj_mid/(N*b);
-        numer = (pow(lam,2.0)- 3.0);
-        denom = (pow(lam,2.0)- 1.0);
-        kj[m]    = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
+      eta_temp = aT[type] * eta;               // viscosity
 
-        eta_temp = aT[type] * eta;               // viscosity
+      // residual
+      G = rj_mid + dt/eta_temp * 2 * pow(M_PI,2.0) * kj *  rj_mid - (rjp + dt/eta_temp*f_mid*2*pow(M_PI,2.0));
 
-        // residual
-        G = rj_mid + dt/eta_temp * kj[m] * rj_mid - (rjp + dt/eta_temp*f_mid);
-
-        if (G > 0) {
-          rj_high = rj_mid;
-        } else {
-          rj_low = rj_mid;
-        }
-
-        // Convergence check
-        if (fabs(G) < 1e-6) break;
+      if (G > 0) {
+        rj_high = rj_mid;
+      } else {
+        rj_low = rj_mid;
       }
 
-      rj_pred[m] = rj_mid; // predicted element length at mid force
-      rj_sum = rj_sum + rj_mid;
+      // Convergence check
+      if (fabs(G) < 1e-6) break;
     }
+
+    rj_pred = rj_mid; // predicted element length at mid force
+    rj_sum = rj_sum + rj_mid;
+    
 
     // Compute residual
     R = f_mid/Ks[type] + rj_sum - r;
@@ -1094,21 +1081,17 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
   bondstore[n][4] = f;     // update fn
 
   // Update bond history variables at converged force
-  for (m = 0; m < N; m++ ) {
-
-      // Get element specific params
-      bondstore[n][m+5+N] = rj_pred[m];      // old ri
+  bondstore[n][6] = rj_pred;      // old ri
       
-      // get stiffness
-      lam = rj_pred[m]/(N*b);
-      numer = (pow(lam,2.0)- 3.0);
-      denom = (pow(lam,2.0)- 1.0);
-      kj[m] = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
+  // get stiffness
+  lam = rj_pred/(N*b);
+  numer = (pow(lam,2.0)- 3.0);
+  denom = (pow(lam,2.0)- 1.0);
+  kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
 
-      // update history variable
-      qn1 = f_mid - rj_pred[m] * kj[m];
-      bondstore[n][m+5] = qn1;
-  }
+  // update history variable
+  qn1 = f_mid - rj_pred * kj;
+  bondstore[n][5] = qn1;
   
   return;
 }
