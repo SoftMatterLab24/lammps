@@ -319,12 +319,10 @@ void BondBPMGKV::compute(int eflag, int vflag)
     b = bondstore[n][3];
     rjp  = bondstore[n][6]; 
 
-    if (rjp > 0.75*N*b) {
+    if (rjp > 0.8*N*b) {
       stable = 0;
-      break;
     }
     
-    stable = 0; // Temp disable direct solve
     if (stable) {
       direct_solve(r, type, n, dt, fs);
     } else {
@@ -934,8 +932,8 @@ void BondBPMGKV::direct_solve(double r, int type, int n, double dt , double &f)
   kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
   eta_temp = aT[type] * eta;                   // viscosity
 
-  tau = eta_temp / (2*M_PI*kj);             // Terminal relaxation time
-  exp_j = exp(-dt * kj / eta_temp);      // exponential term
+  tau = eta_temp / (2*kj*pow(M_PI,2.0));             // Terminal relaxation time
+  exp_j = exp(-dt / tau);      // exponential term
 
   if (dt/eta_temp < 1e-10){
     alph = 1; // for small dt/eta take limit directly: alpha -> 1
@@ -964,7 +962,7 @@ void BondBPMGKV::direct_solve(double r, int type, int n, double dt , double &f)
  
   rjn1 = (fcor - qn1) / kj;
   rjn1 = std::min(rjn1, rj_pred);
-  bondstore[n][5]   = qn1;  // qi
+  bondstore[n][5] = qn1;  // qi
   bondstore[n][6] = rjn1; // ri
 
   lam = rjn1/(N*b);
@@ -1043,7 +1041,7 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
       eta_temp = aT[type] * eta;               // viscosity
 
       // residual
-      G = rj_mid + dt/eta_temp * 2 * pow(M_PI,2.0) * kj *  rj_mid - (rjp + dt/eta_temp*f_mid*2*pow(M_PI,2.0));
+      G = rj_mid + (dt/eta_temp)*2*pow(M_PI,2.0)*kj*rj_mid - (rjp + (dt/eta_temp)*f_mid*2*pow(M_PI,2.0));
 
       if (G > 0) {
         rj_high = rj_mid;
@@ -1090,7 +1088,7 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
   kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
 
   // update history variable
-  qn1 = f_mid - rj_pred * kj;
+  qn1 = f_mid - (rj_pred*kj);
   bondstore[n][5] = qn1;
   
   return;
