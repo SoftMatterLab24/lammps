@@ -54,10 +54,9 @@ class BondBPMGKV : public BondBPM {
 
   struct Table {
    int ninput;
-   int *iatomfile, *jatomfile;
    double r0;
-   double *Nfile, *bfile;
-   double *N, *b;
+   int *iatomfile, *jatomfile, *Nfile, *N;
+   double *bfile, *b;
   };
 
   int tabstyle, tablength, ntables, *tabindex;

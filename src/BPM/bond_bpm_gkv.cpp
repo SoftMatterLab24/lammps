@@ -720,8 +720,8 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
 
 void BondBPMGKV::null_table(Table *tb)
 {
-  tb->Nfile = tb->bfile = nullptr;
-  tb->N = tb->b =  nullptr;
+  tb->b = tb->bfile = nullptr;
+  tb->N = tb->Nfile = nullptr;
 
 }
 
