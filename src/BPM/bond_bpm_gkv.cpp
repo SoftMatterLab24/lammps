@@ -303,7 +303,7 @@ void BondBPMGKV::compute(int eflag, int vflag)
 
     rsq = delx * delx + dely * dely + delz * delz;
     r = sqrt(rsq);    
-    //e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
+    rinv = 1.0 / r;
 
     // Check stability criterion
     int stable = 1;
@@ -323,7 +323,6 @@ void BondBPMGKV::compute(int eflag, int vflag)
     }
 
     fbond = -fs;
-
     //bond break criterion !! update
     if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag) {  
       bondlist[n][2] = 0;
@@ -338,16 +337,6 @@ void BondBPMGKV::compute(int eflag, int vflag)
     fbond -= gamma[type] * dot * rinv;
     fbond *= rinv;
 
-    if (smooth_flag) {
-      // Disable for GKV
-      smooth = 0;//(r - r0) / (r0 * rcrit[type]);
-      smooth *= smooth;
-      smooth *= smooth;
-      smooth *= smooth;
-      smooth = 1 - smooth;
-      fbond *= smooth;
-    }
-
     if (newton_bond || i1 < nlocal) {
       f[i1][0] += delx * fbond;
       f[i1][1] += dely * fbond;
@@ -359,7 +348,7 @@ void BondBPMGKV::compute(int eflag, int vflag)
       f[i2][1] -= dely * fbond;
       f[i2][2] -= delz * fbond;
     }
-
+    
     if (evflag) ev_tally(i1, i2, nlocal, newton_bond, 0.0, fbond, delx, dely, delz);
   }
 
