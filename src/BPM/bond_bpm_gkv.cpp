@@ -305,13 +305,6 @@ void BondBPMGKV::compute(int eflag, int vflag)
     r = sqrt(rsq);    
     //e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
 
-    //bond break criterion !! update
-    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag) {  
-      bondlist[n][2] = 0;
-      process_broken(i1, i2);
-      continue;
-    }
-
     // Check stability criterion
     int stable = 1;
     
@@ -330,6 +323,13 @@ void BondBPMGKV::compute(int eflag, int vflag)
     }
 
     fbond = -fs;
+
+    //bond break criterion !! update
+    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag) {  
+      bondlist[n][2] = 0;
+      process_broken(i1, i2);
+      continue;
+    }
 
     delvx = v[i1][0] - v[i2][0];
     delvy = v[i1][1] - v[i2][1];
