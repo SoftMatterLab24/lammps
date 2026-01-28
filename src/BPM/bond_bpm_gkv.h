@@ -44,8 +44,8 @@ class BondBPMGKV : public BondBPM {
   //void unpack_reverse_comm(int, int *, double *) override;
 
  protected:
-  double *Ks, *Kj, *rcrit, *gamma, *zeta, *aT;
-  int smooth_flag, normalize_flag, temperature_flag;
+  double *Ks, *Kj, *rcrit, *gamma, *zeta, *aT, *lamc;
+  int smooth_flag, normalize_flag, temperature_flag, stretch_flag;
 
   int nmax;
   char *id_fix_property_bond;

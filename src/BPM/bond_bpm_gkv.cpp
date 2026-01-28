@@ -37,10 +37,11 @@ using namespace LAMMPS_NS;
 
 BondBPMGKV::BondBPMGKV(LAMMPS *_lmp) :
     BondBPM(_lmp), Ks(nullptr), Kj(nullptr), rcrit(nullptr), gamma(nullptr), zeta(nullptr),
-    aT(nullptr), aT_temp(nullptr), id_fix_property_bond(nullptr)
+    aT(nullptr), aT_temp(nullptr), lamc(nullptr), id_fix_property_bond(nullptr)
 {
   partial_flag = 1;
   smooth_flag = 1;
+  stretch_flag = 0;
   normalize_flag = 0;
   temperature_flag = 0;
   writedata = 0;
@@ -86,6 +87,7 @@ BondBPMGKV::~BondBPMGKV()
     memory->destroy(gamma);
     memory->destroy(aT);
     memory->destroy(aT_temp);
+    memory->destroy(lamc);
   }
 
 }
@@ -242,7 +244,7 @@ void BondBPMGKV::compute(int eflag, int vflag)
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, rs, rn , rjp , rinv, smooth, fs, fbond, dot;
   double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
-  double term1, term2, term3, numer, denom, lam;
+  double term1, term2, term3, numer, denom, lam, lamb;
 
   ev_init(eflag, vflag);
 
@@ -270,7 +272,6 @@ void BondBPMGKV::compute(int eflag, int vflag)
     i1 = bondlist[n][0];
     i2 = bondlist[n][1];
     type = bondlist[n][2];
-    rs = bondstore[n][0]; 
 
     const Table *tb = &tables[tabindex[type]];
 
@@ -324,10 +325,20 @@ void BondBPMGKV::compute(int eflag, int vflag)
 
     fbond = -fs;
     //bond break criterion !! update
-    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag) {  
+    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag && !stretch_flag) {  
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
+    }
+
+    if (break_flag && stretch_flag) {
+      rs = bondstore[n][0]; 
+      lamb = (rs + N*b) / (N*b);
+      if (lamb > lamc[type]) {
+        bondlist[n][2] = 0;
+        process_broken(i1, i2);
+        continue;
+      }
     }
 
     delvx = v[i1][0] - v[i2][0];
@@ -369,6 +380,7 @@ void BondBPMGKV::allocate()
   memory->create(zeta, np1, "bond:zeta");
   memory->create(aT,np1,"bond:aT"); 
   memory->create(aT_temp,np1,"bond:aT_temp");
+  memory->create(lamc, np1, "bond:lamc");
   memory->create(tabindex, np1, "bond:tabindex");
   memory->create(setflag, np1, "bond:setflag");
 
@@ -402,14 +414,21 @@ void BondBPMGKV::coeff(int narg, char **arg)
 
   // default values
   double aT_one = 1;
+  double lamc_one = 0.95;
 
   // Parse optional remaining arguments
   int iarg = 8;
   while (iarg < narg) {
-    if (temperature_flag) {
-      if (iarg+1 > narg)  error->all(FLERR,"Incorrect args for bond coefficients");
-      aT_one = utils::numeric(FLERR, arg[iarg], false, lmp);
-      iarg += 1;
+    if ((strcmp(arg[iarg], "temp") == 0) && temperature_flag) {
+      if (iarg + 1 > narg)  error->all(FLERR, "Illegal bond bpm command, incorrect args for bond coefficients");
+      aT_one = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "stretch") == 0) {
+      if (iarg + 1 > narg) error->all(FLERR, "Illegal bond bpm command, incorrect args for bond coefficients");
+      lamc_one = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      if (lamc_one <= 1.0) error->all(FLERR, "Illegal bond bpm command, stretch criterion must be lamc > 1");
+      stretch_flag = 1;
+      iarg += 2;
     } else error->all(FLERR,"Illegal fix bond/dynamic command");
   }
 
@@ -422,6 +441,7 @@ void BondBPMGKV::coeff(int narg, char **arg)
     zeta[i] = zeta_one;
     aT[i] = aT_one;
     aT_temp[i] = aT_one;
+    lamc[i] = lamc_one;
     setflag[i] = 1;
     tabindex[i] = ntables;
     
@@ -496,6 +516,7 @@ void BondBPMGKV::write_restart(FILE *fp)
   fwrite(&zeta[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&aT[1], sizeof(double), atom->nbondtypes, fp);
   fwrite(&aT_temp[1], sizeof(double), atom->nbondtypes, fp);
+  fwrite(&lamc[1], sizeof(double), atom->nbondtypes, fp);
 
   fwrite(&tabstyle, sizeof(int), 1, fp);
   fwrite(&tablength, sizeof(int), 1, fp);
@@ -538,6 +559,7 @@ void BondBPMGKV::read_restart(FILE *fp)
     utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &tablength, sizeof(int), 1, fp, nullptr, error);
@@ -553,6 +575,7 @@ void BondBPMGKV::read_restart(FILE *fp)
   MPI_Bcast(&zeta[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&aT[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
   MPI_Bcast(&aT_temp[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
+  MPI_Bcast(&lamc[1], atom->nbondtypes, MPI_DOUBLE, 0, world);
 
   MPI_Bcast(&tabstyle, 1, MPI_INT, 0, world);
   MPI_Bcast(&tablength, 1, MPI_INT, 0, world);
