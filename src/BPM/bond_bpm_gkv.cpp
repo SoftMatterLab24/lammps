@@ -688,8 +688,10 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   }
    
   // retrieve bond history variables
+  N = bondstore[n][2];
+  b = bondstore[n][3];
   fn = bondstore[n][4];
-
+ 
   fforce = -fn;
   
   //double e = (r0 !=0.0) ? (r - r0) / r0 : 0.0;
@@ -717,9 +719,9 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
 
   // set single_extra quantities
 
-  svector[0] = 0;
-  svector[1] = 0;
-  svector[2] = 0;
+  svector[0] = N;
+  svector[1] = b;
+  svector[2] = aT[type];
   svector[3] = 0;
   svector[4] = 0;
 
