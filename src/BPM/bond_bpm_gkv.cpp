@@ -670,7 +670,7 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   double rinv = 1.0 / r;
 
   int N;
-  double rs, rn, rjp;
+  double rs, rn, rj;
   double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
   double term1, term2, term3, numer, denom, lam;
 
@@ -688,9 +688,11 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
   }
    
   // retrieve bond history variables
-  N = bondstore[n][2];
-  b = bondstore[n][3];
-  fn = bondstore[n][4];
+  rs = bondstore[n][0];   // segmental length
+  rj = bondstore[n][6];   // entropic length
+  N = bondstore[n][2];    // number of segments
+  b = bondstore[n][3];    // segment length
+  fn = bondstore[n][4];   // previous bond force
  
   fforce = -fn;
   
@@ -721,9 +723,9 @@ double BondBPMGKV::single(int type, double rsq, int i, int j, double &fforce)
 
   svector[0] = N;
   svector[1] = b;
-  svector[2] = aT[type];
-  svector[3] = 0;
-  svector[4] = 0;
+  svector[2] = rs;        // segmental length
+  svector[3] = rj;        // entropic length  
+  svector[4] = aT[type];
 
   return 0.0;
 }
