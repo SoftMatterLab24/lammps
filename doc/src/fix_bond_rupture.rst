@@ -1,6 +1,6 @@
-.. index:: fix bond/break
+.. index:: fix bond/rupture
 
-fix bond/break command
+fix bond/rupture command
 ======================
 
 Syntax
@@ -8,71 +8,135 @@ Syntax
 
 .. code-block:: LAMMPS
 
-   fix ID group-ID bond/break Nevery bondtype Rmax keyword values ...
+   fix ID group-ID bond/rupture bondtype style args keyword value
 
 * ID, group-ID are documented in :doc:`fix <fix>` command
-* bond/break = style name of this fix command
-* Nevery = attempt bond breaking every this many steps
+* bond/rupture = name of this fix command
 * bondtype = type of bonds to break (integer or type label)
-* Rmax = bond longer than Rmax can break (distance units)
+* style_name = *dist* or *prob/fraction* or *prob/rate* or *prob/slip* or *prob/slip/catch* 
+
+  .. parsed-literal::
+       *dist* args = rcrit
+         rcrit = bond longer than rcrit can break if otherwise eligible (distance units)
+       *prob/fraction* args = fraction seed
+         fraction = break a bond with this probability if otherwise eligible
+         seed = random number seed (positive integer)
+       *prob/rate* args = kr
+         kr = bond rutpure rate if otherwise eligible (inverse time units)
+       *prob/slip* args = ks0 f0
+         ks0 = intrinsic bond rutpure rate if otherwise eligible (inverse time units)
+         f0 = force-sensitivity of the bonds slip barrier (force units)
+       *prob/slip/catch* args = ks0 kc0 fs0 fc0
+         ks0 = slip barrier intrinsic rate (inverse time units)
+         kc0 = catch barrier intrinsic rate (inverse time units)
+         fs0 = force-sensitivity of the bonds slip barrier (force units)
+         fc0 = force-sensitivity of the bonds catch barrier (force units)
+
 * zero or more keyword/value pairs may be appended
-* keyword = *prob*
+* keyword = *bond/table* or *bond/distribution* or *critical*
 
   .. parsed-literal::
 
-       *prob* values = fraction seed
-         fraction = break a bond with this probability if otherwise eligible
-         seed = random number seed (positive integer)
-
+       *bond/table* values = filename key
+         filename = file containing the tablulated per/bond style args
+         key = section of filename to start reading
+       *bond/distribution* values = dist_type params
+         dist_type = *gauss* or *exponential* or *weibull*
+            gauss params =
+            exponential params = 
+            weibull params = 
+       *critical* value = rcrit
+            rcrit = enforce bonds longer than rcrit rupture (distance units)
+   
 Examples
 """"""""
 
 .. code-block:: LAMMPS
 
-   fix 5 all bond/break 10 2 1.2
-   fix 5 polymer bond/break 1 1 2.0 prob 0.5 49829
+   fix 5 all bond/rupture 1 dist 0.3
+   fix 5 all bond/rupture 2 prob/fraction 0.3 12345 bond/table rupture.table start critical 0.3
 
 Description
 """""""""""
 
 Break bonds between pairs of atoms as a simulation runs according to
-specified criteria.  This can be used to model the dissolution of a
-polymer network due to stretching of the simulation box or other
+specified criteria.  This can be used to model rupture of chains 
+in a polymer network due to stretching of the simulation box or other
 deformations.  In this context, a bond means an interaction between a
 pair of atoms computed by the :doc:`bond_style <bond_style>` command.
 Once the bond is broken it will be permanently deleted, as will all
-angle, dihedral, and improper interactions that bond is part of.
+angle, dihedral, and improper interactions that bond is part of. There
+are several possible styles that determine the nature of the rupture criterion.
 
-This is different than a :doc:`pair-wise <pair_style>` bond-order
-potential such as Tersoff or AIREBO which infers bonds and many-body
-interactions based on the current geometry of a small cluster of atoms
-and effectively creates and destroys bonds and higher-order many-body
-interactions from timestep to timestep as atoms move.
+The *dist* style specifies rupture after bonds exceed a critial legnth set by value *rcrit*.
 
-A check for possible bond breakage is performed every *Nevery*
-timesteps.  If two bonded atoms :math:`i` and :math:`j` are farther than the
-distance *Rmax* from each other, the bond is of type *bondtype*, and both
-:math:`i` and :math:`j` are in the specified fix group, then the bond between
-:math:`i` and :math:`j` is labeled as a "possible" bond to break.
+The *prob/fraction* style specifies bond rupture based on a fixed probability set 
+by the value *fraction*, which must be a value between 0 and 1. For rupture,
+a uniform random number between 0.0 and 1.0 is generated and the bond is only
+broken if the random number is less than *fraction*. The seed can be used to 
+specifiy the processor-unique seed used to initialized the Marsaglia random 
+number generator. By default the seed is 12345. The value setting must be a positive integer.
 
-If several bonds involving an atom are stretched, it may have multiple
-possible bonds to break.  Every atom checks its list of possible bonds
-to break and labels the longest such bond as its "sole" bond to break.
-After this is done, if atom :math:`i` is bonded to atom :math:`j` in its sole
-bond, and atom :math:`j` is bonded to atom :math:`j` in its sole bond, then the
-bond between :math:`i` and :math:`j` is "eligible" to be broken.
+The *prob/rate* style specifices bond rupture based on a constant rupture rate set
+by the value *kr*, which must be a positive value. A bond will break with a discrete
+rupture probability defined as:
 
-Note that these rules mean an atom will only be part of at most one
-broken bond on a given time step.  It also means that if atom :math:`i` chooses
-atom :math:`j` as its sole partner, but atom :math:`j` chooses atom :math:`k`
-as its sole partner (because :math:`R_{jk} > R_{ij}`), then this means atom
-:math:`i` will not be part of a broken bond on this time step, even if it has
-other possible bond partners.
+.. math::
 
-The *prob* keyword can effect whether an eligible bond is actually
-broken.  The *fraction* setting must be a value between 0.0 and 1.0.
-A uniform random number between 0.0 and 1.0 is generated and the
-eligible bond is only broken if the random number is less than *fraction*.
+   \delta P_r = 1 - \exp{\left( -k_{r} \Delta t \right) } 
+
+where :math:`k_{r}` is the rupture rate, and :math:`\Delta t` is the timestep. For every
+eligible bond if the probability constraint is satisfied then the bond is destroyed, 
+otherwise it remains.
+
+The *prob/slip* style can be used to modify the rupture probability by assuming that
+rupture kinetics is force-senstive. In this case, bonds rupture rate increases 
+exponentially under increasing force given by Bell's model:
+
+.. math::
+
+   k_r^{slip} = k_{s0} \exp{ \left( \frac{f}{f0} \right)}
+
+where :math:`k_{s0}` is the nominal or fixed rupture rate in the absence of
+force, :math:`f` is the bonds force, and :math:`f0` characterizes 
+the bonds force-sensitivity.
+
+The *prob/slip/catch* style can be used to modify the rupture probability by
+assuming that rupture kinetics is force-senstive. However, unlike *prob/slip*
+the rupture rate at first decreases before subsequently increasing under
+increasing force. This is achieved with the two-pathway model:
+
+.. math::
+
+ k_r^{slip-catch} =k_{s0} \exp{ \left( \frac{f}{fs0} \right)} + k_{c0} \exp{ \left( -\frac{f}{fc0} \right)}
+
+where :math:`f` is the bonds force, :math:`k_{s0}` and 
+:math:`k_{c0}` are the nominal rupture rates of the slip 
+and catch pathways respectively. The force-sensitivity of
+the slip and catch barriers are given by :math:`fs0 and :math:`fc0.
+
+The *bond/table* keyword allows a unique rupture criterion to be
+defined on a per bond basis, by specifying a tabulated file with 
+arguments for each bond. The expected number of arguments in the 
+table depends on the rupture style. The filename specifies the file containing 
+the tablulated arguments, and the keyword specifies a section of 
+the file to begin reading from. An example format of the file 
+for the *dist* style is provided below. The *bond/table* keyword cannot
+be used with *bond/distribution* keyword
+
+The *bond/distribution* keyword allows a unique rupture criterion to be
+defined on a per bond basis, by drawing certain style arguments
+from a defined distribution type. The argument drawn, depends on the
+rupture style. For instance with distribution *Gauss* and rupture 
+style *dist* the  value *rcrit* is drawn with mean :math:`\mu` and 
+standard deviation :math:`\sigma`. Note that not all style arguments
+will be drawn from the distibution, for example *seed* in the *prob/fraction*
+style is set globally. The *bond/distribution* keyword cannot
+be used with *bond/table* keyword.
+
+The *critical* keyword enforces that bonds rupture after exceeding a
+critical length set by value *rcrit*. This can for example be used 
+in conjunction with the *prob* rupture styles, to ensure bond rupture. 
 
 When a bond is broken, data structures within LAMMPS that store bond
 topologies are updated to reflect the breakage.  Likewise, if the bond
@@ -118,20 +182,36 @@ information on related features in LAMMPS.
 
 ----------
 
+Formatting the table file
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+The format of a tabulated file for the *dist* style is as follows (without parenthesized comments):
+
+.. code-block:: LAMMPS
+
+   # Args for bond rupture (dist style)  (one or more comment or blank lines)
+   
+   DATA                                  (keyword is the first text on line)
+   n 5                                   (n bonds)
+                                         (blank line)
+   1 1 2 0.20                            (index, iatom, jatom, rcrit)
+   2 1 3 0.25
+   ...
+   5 4 5 0.32
+
+The number of bonds *n* defined in the table file must be equal to 
+the total number of bonds in the simulation. The first three column 
+entries must be the index, iatom, and jatom (in that order). The index 
+is a dummy index as LAMMPS uses iatom jatom indexes to properly store data. 
+The following column entries depends on the selected style
+and must mactch the that styles number of args. 
+
+----------
+
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
 No information about this fix is written to :doc:`binary restart files <restart>`.  None of the :doc:`fix_modify <fix_modify>` options
 are relevant to this fix.
-
-This fix computes two statistics, which it stores in a global vector of
-length 2. This vector can be accessed by various :doc:`output commands
-<Howto_output>`.  The vector values calculated by this fix are "intensive".
-
-The two quantities in the global vector are
-
-  (1) number of bonds broken on the most recent breakage time step
-  (2) cumulative number of bonds broken
 
 No parameter of this fix can be used with the *start/stop* keywords of
 the :doc:`run <run>` command.  This fix is not invoked during :doc:`energy minimization <minimize>`.
@@ -139,7 +219,7 @@ the :doc:`run <run>` command.  This fix is not invoked during :doc:`energy minim
 Restrictions
 """"""""""""
 
-This fix is part of the MC package.  It is only enabled if LAMMPS was
+This fix is part of the BPM package.  It is only enabled if LAMMPS was
 built with that package.  See the :doc:`Build package <Build_package>`
 doc page for more info.
 
@@ -152,4 +232,4 @@ Related commands
 Default
 """""""
 
-The option defaults are prob = 1.0.
+The option defaults are seed = 12345.
