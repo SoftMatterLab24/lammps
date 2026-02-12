@@ -50,7 +50,7 @@ class FixBondRupture : public Fix {
   class RanMars *random;
 
   // Default arguments
-  int btype;
+  int btype, seed;
   double rcritsq, p_fraction, k0, f0, ks0, kc0, fs0, fc0;
 
   // Flags for styles

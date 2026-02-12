@@ -209,7 +209,7 @@ void BondBPMGKV::store_data()
       dt_temp = dt;
 
       // Set internal viscous history variables to zero
-      fix_bond_history->update_atom_value(i, m, 5, 0);    // qi
+      fix_bond_history->update_atom_value(i, m, 5, 0);  // qi
       bondstore[m][5] = 0;
 
       // Set intial lengths of Kelvin-Voigt elements to zero

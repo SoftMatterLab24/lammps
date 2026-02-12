@@ -62,6 +62,9 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   ntables = 0;
   tables = nullptr;
 
+  // Default settings
+  seed = 12345;
+
   // style_flags:
   flag_dist = 0; flag_fraction = 0; flag_slip = 0; flag_slip_catch = 0; flag_rate = 0;
   
@@ -78,39 +81,43 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   // Parse style-specific values
     if (strcmp(style_name,"dist") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_dist = 1; ndata = 1;
+        flag_dist = 1; 
         double rcrit = utils::numeric(FLERR,arg[iarg],false,lmp);
         if (rcrit < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
         rcritsq = rcrit*rcrit;
+        ndata = 1;
         iarg += 1;
     } else if (strcmp(style_name,"prob/fraction") == 0) {
         if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_fraction = 1; ndata = 1;
+        flag_fraction = 1; 
         p_fraction = utils::numeric(FLERR,arg[iarg],false,lmp);
-        double seed = utils::numeric(FLERR,arg[iarg+1],false,lmp);
-        random = new RanMars(lmp,seed + me); // initialize Marsaglia RNG with processor-unique seed
+        seed = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (p_fraction < 0.0 || p_fraction > 1.0) error->all(FLERR,"Illegal fix bond/rupture command");
+        ndata = 1;
         iarg += 2;
     } else if (strcmp(style_name,"prob/slip") == 0) {
         if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_slip = 1; ndata = 2;
+        flag_slip = 1; 
         k0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         f0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (k0 < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
+        ndata = 2;
         iarg += 2;
     } else if (strcmp(style_name,"prob/slip/catch") == 0) {
         if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_slip_catch = 1; ndata = 4;
+        flag_slip_catch = 1; 
         ks0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         kc0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         fs0 = utils::numeric(FLERR,arg[iarg+2],false,lmp);
         fc0 = utils::numeric(FLERR,arg[iarg+3],false,lmp);
         if (ks0 < 0.0 || kc0 < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
+        ndata = 4;
         iarg += 4;
     } else if (strcmp(style_name,"prob/rate") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_rate = 1; ndata = 1;
+        flag_rate = 1; 
         k0 = utils::numeric(FLERR,arg[iarg],false,lmp);
+        ndata = 1;
         iarg += 1;
     } else error->all(FLERR,"Illegal fix bond/rupture style");
 
@@ -140,6 +147,9 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
     } else error->all(FLERR,"Illegal fix bond/rupture command");
   }
 
+  // initialize Marsaglia RNG with processor-unique seed
+  random = new RanMars(lmp,seed + me); 
+
   if (flag_table && flag_distibution)
     error->all(FLERR,"Cannot use argument bond/table with argument bond/distribution");
  
@@ -149,9 +159,6 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   // create a unique id for this fix's private bond history instance
   update_flag = 1;
   id_fix_bond_history = utils::strdup(fmt::format("HISTORY_BOND_RUPTURE_{}", instance_total));
-
-  // initialize history bookkeeping for this fix
-  // Store one value per bond: the bond length (r)
   
 }
 
@@ -162,11 +169,11 @@ FixBondRupture::~FixBondRupture()
   if (fix_bond_history && modify->nfix) modify->delete_fix(id_fix_bond_history);
   delete[] id_fix_bond_history;
   if (setflag) memory->destroy(setflag);
+  if (tabindex) memory->destroy(tabindex);
 
   for (int m = 0; m < ntables; m++) free_table(&tables[m]);
   memory->sfree(tables);
-
-
+  
 }
 
 /* ---------------------------------------------------------------------- */
@@ -187,6 +194,8 @@ void FixBondRupture::init()
   if (!setflag) {
     int np1 = atom->nbondtypes + 1;
     memory->create(setflag, np1, "fix_bond_rupture:setflag");
+    memory->create(tabindex, np1, "fix_bond_rupture:tabindex");
+    
     for (int i = 0; i < np1; i++) setflag[i] = 0;
     if (btype >= 1 && btype <= atom->nbondtypes) setflag[btype] = 1;
   }
@@ -217,6 +226,8 @@ double FixBondRupture::store_bond(int n, int i, int j)
 
   int **bond_type = atom->bond_type;
 
+  if (flag_table) error->all(FLERR,"Cannot add bonds with fix bond/rupture using bond/table style");
+  
   delx = x[i][0] - x[j][0];
   dely = x[i][1] - x[j][1];
   delz = x[i][2] - x[j][2];
@@ -286,6 +297,7 @@ void FixBondRupture::store_data()
         // need to lookup the bond in table
         ia = atom->tag[i];
         ja = atom->tag[j];
+        
         const Table *tb = &tables[tabindex[type]];
 
         for (n = 0; n < tb->ninput; n++) {
@@ -367,7 +379,10 @@ void FixBondRupture::post_integrate()
     // If per/bond data, get style modifiers from bondstore
     if (flag_table || flag_distibution) {
         // get style modifiers from bondstore
-        if (flag_fraction){
+
+        if (flag_dist) {
+            rcritsq = bondstore[n][0]*bondstore[n][0];
+        } else if (flag_fraction){
             p_fraction = bondstore[n][0]; 
         } else if (flag_slip){
             k0 = bondstore[n][0];
@@ -435,7 +450,7 @@ void FixBondRupture::post_integrate()
         }
     }
     
-    if (p_rupture > probability) continue; // bond does not rupture
+    if (p_rupture < probability) continue; // bond does not rupture
 
     break_count = 1;
     bondlist[n][2] = 0;
@@ -701,7 +716,7 @@ void FixBondRupture::read_table(Table *tb, char *file, char *keyword)
     }
   }
 
-  printf("Read %i parameters from bond table\n",tb->ninput);
+  printf("Read parameters for %i bonds from table\n",tb->ninput);
 
 }
 
@@ -713,6 +728,7 @@ void FixBondRupture::read_table(Table *tb, char *file, char *keyword)
 
 void FixBondRupture::param_extract(Table *tb, char *line)
 {
+  int nbondlist = neighbor->nbondlist;
   tb->ninput = 0;
 
   try {
@@ -732,6 +748,7 @@ void FixBondRupture::param_extract(Table *tb, char *line)
   }
 
   if (tb->ninput == 0) error->one(FLERR, "Bond table parameters did not set N");
+  if (tb->ninput > nbondlist) error->one(FLERR, "Bond table N cannot exceed number of bonds");
   
 }
 
