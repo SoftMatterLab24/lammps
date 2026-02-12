@@ -36,6 +36,7 @@
 #include <iostream>
 #include <cstring>
 #include <utility>
+#include <unordered_map>
 #include "math_const.h"
 #include "random_mars.h"
 
@@ -73,6 +74,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
 
   btype = utils::inumeric(FLERR,arg[3],false,lmp);
   const char *style_name = arg[4];
+  std::vector<std::string> param_names;
 
   if (btype < 1 || btype > atom->nbondtypes)
   error->all(FLERR,"Invalid bond type in fix bond/rupture command");
@@ -81,15 +83,15 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   // Parse style-specific values
     if (strcmp(style_name,"dist") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_dist = 1; 
-        double rcrit = utils::numeric(FLERR,arg[iarg],false,lmp);
+        flag_dist = 1; param_names = {"rcrit"};
+        rcrit = utils::numeric(FLERR,arg[iarg],false,lmp);
         if (rcrit < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
         rcritsq = rcrit*rcrit;
         ndata = 1;
         iarg += 1;
     } else if (strcmp(style_name,"prob/fraction") == 0) {
         if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_fraction = 1; 
+        flag_fraction = 1; param_names = {"fraction"};
         p_fraction = utils::numeric(FLERR,arg[iarg],false,lmp);
         seed = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (p_fraction < 0.0 || p_fraction > 1.0) error->all(FLERR,"Illegal fix bond/rupture command");
@@ -97,7 +99,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         iarg += 2;
     } else if (strcmp(style_name,"prob/slip") == 0) {
         if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_slip = 1; 
+        flag_slip = 1; param_names = {"ks0","f0"};
         k0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         f0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (k0 < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
@@ -105,7 +107,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         iarg += 2;
     } else if (strcmp(style_name,"prob/slip/catch") == 0) {
         if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_slip_catch = 1; 
+        flag_slip_catch = 1; param_names = {"ks0","kc0","fs0","fc0"};
         ks0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         kc0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         fs0 = utils::numeric(FLERR,arg[iarg+2],false,lmp);
@@ -115,11 +117,27 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         iarg += 4;
     } else if (strcmp(style_name,"prob/rate") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_rate = 1; 
+        flag_rate = 1; param_names = {"kr"};
         k0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         ndata = 1;
         iarg += 1;
     } else error->all(FLERR,"Illegal fix bond/rupture style");
+
+    // initialze size of pdf parameter arrays based on style
+    lo = new double[ndata];
+    hi = new double[ndata];
+    mu = new double[ndata];
+    sigma = new double[ndata];
+    lambda = new double[ndata];
+    alpha = new double[ndata];
+    beta = new double[ndata];
+
+    use_dist = new int[ndata];
+    for (int i = 0; i < ndata; ++i) use_dist[i] = 0;   // 0 = deterministic, 1 = draw from distribution
+
+    // Create a mapping of parameter name to index for lookup when parsing keyword args
+    std::unordered_map<std::string,int> pindex;
+    for (int i = 0; i < (int)param_names.size(); ++i) pindex[param_names[i]] = i;
 
   // Parse remaining keyword arguments
   while (iarg < narg) {
@@ -133,10 +151,62 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
       bcast_table(tb);
       iarg += 3;
     } else if (strcmp(arg[iarg],"bond/distribution") == 0) {
-      if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
+      if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
       flag_distibution = 1;
-      // for now this style does not take any additional args
-      iarg += 1;
+      
+      dist_type = arg[iarg+1];
+      
+      int need = 0; // the number of distribution parameters needed for this distribution style
+      if (strcmp(dist_type,"uniform") == 0 ) {
+        need = 2;
+      } else if (strcmp(dist_type,"gauss") == 0) {
+        need = 2;
+      } else if (strcmp(dist_type,"exponential") == 0) {
+        need = 1;
+      } else if (strcmp(dist_type,"weibull") == 0) {
+        need = 2;
+      } else error->all(FLERR,"Illegal fix bond/rupture command");
+
+      iarg += 2;
+      
+      // parse distribution parameters for each style parameter index until run out of args or hit another keyword
+      while (iarg < narg && (strcmp(arg[iarg + 1],"bond/table") == 0 || strcmp(arg[iarg + 1],"critical") == 0)) {
+
+        // must be a known parameter name for this rupture style
+        auto it = pindex.find(arg[iarg]);
+        if (it == pindex.end())
+            error->all(FLERR,"Illegal fix bond/rupture bond/distribution parameter name");
+
+        int idx = it->second;
+        if (use_dist[idx])
+            error->all(FLERR,"Duplicate bond/distribution entry for same parameter");
+
+        if (iarg + 1 + need > narg)
+        error->all(FLERR,"Not enough arguments for bond/distribution parameter block");
+
+        use_dist[idx] = 1;
+        // parse the distribution parameters for this parameter index
+        if (strcmp(dist_type,"uniform") == 0 ) {
+            lo[idx] = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+            hi[idx] = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+            if (hi[idx] <= lo[idx]) error->all(FLERR,"Illegal uniform distribution bounds");
+            iarg += 3;
+        } else if (strcmp(dist_type,"gauss") == 0) {
+            mu[idx]    = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+            sigma[idx] = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+            if (sigma[idx] <= 0.0) error->all(FLERR,"Illegal gauss sigma");
+            iarg += 3;
+        } else if (strcmp(dist_type,"exponential") == 0) {
+            lambda[idx] = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+            if (lambda[idx] <= 0.0) error->all(FLERR,"Illegal exponential lambda");
+            iarg += 2;
+        } else if (strcmp(dist_type,"weibull") == 0) {
+            alpha[idx] = utils::numeric(FLERR,arg[iarg+1],false,lmp); // shape or scale—your convention
+            beta[idx]  = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+            if (alpha[idx] <= 0.0 || beta[idx] <= 0.0) error->all(FLERR,"Illegal weibull params");
+            iarg += 3;
+        } else error->all(FLERR,"Illegal fix bond/rupture command");
+      }
     } else if (strcmp(arg[iarg],"bond/crit") == 0) {
      if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
       flag_crit = 1;
@@ -283,7 +353,7 @@ void FixBondRupture::store_data()
 
     // Initialize bondstore by looping over the bondlist
     for (i = 0; i < atom->nlocal; i++) {
-        for (m = 0; m < atom->num_bond[i]; m++) {
+      for (m = 0; m < atom->num_bond[i]; m++) {
         type = bond_type[i][m];
 
         //Skip if bond was turned off
@@ -295,48 +365,53 @@ void FixBondRupture::store_data()
         
         // if table style, grab data from table
         // need to lookup the bond in table
-        ia = atom->tag[i];
-        ja = atom->tag[j];
+        if (flag_table) {
+          ia = atom->tag[i];
+          ja = atom->tag[j];
         
-        const Table *tb = &tables[tabindex[type]];
+          const Table *tb = &tables[tabindex[type]];
 
-        for (n = 0; n < tb->ninput; n++) {
+          for (n = 0; n < tb->ninput; n++) {
             iatom = tb->iatomfile[n];
             jatom = tb->jatomfile[n];
             if ((iatom == ia && jatom == ja) || (iatom == ja && jatom == ia)) {
                 break; 
             }
-        }
+          }
 
-        for (int l = 0; l < ndata; l++) {
-          double value = tb->datafile[n*ndata + l]; // pull value from table file for this bond and this data index
-          fix_bond_history->update_atom_value(j, m, l, value);  
-        }
-
-        // if distribution style, grab from distribution
-        if (flag_distibution) { 
-            // 
+          for (int l = 0; l < ndata; l++) {
+            double value = tb->datafile[n*ndata + l]; // pull value from table file for this bond and this data index
+            fix_bond_history->update_atom_value(j, m, l, value);  
+          }
         }
         
-        //delx = x[i][0] - x[j][0];
-        //dely = x[i][1] - x[j][1];
-        //delz = x[i][2] - x[j][2];
-
-        // Get closest image in case bonded with ghost
-        //domain->minimum_image(FLERR,delx, dely, delz);
-        //r = sqrt(delx * delx + dely * dely + delz * delz);
-        //r = 100; // temporary to test
-
-        //fix_bond_history->update_atom_value(i, m, 0, r);
-
-        //bondstore[m][0] = r;
-
+        // if distribution style, grab from distribution
+        if (flag_distibution) { 
+          for (int l = 0; l < ndata; l++) {
+              double value = 0.0;
+              if (use_dist[l]) {
+                  value = sample_cdf(l, random->uniform());
+              } else {
+                  // if not using distribution for this parameter, use the default value specified in the input script
+                  if (flag_dist){
+                      value = rcritsq;
+                  } else if (flag_fraction){
+                      value = p_fraction;
+                  } else if (flag_slip){
+                      value = k0;
+                  } else if (flag_slip_catch){
+                      value = ks0;
+                  } else if (flag_rate){
+                      value = k0;
+                  }
+              }
+              fix_bond_history->update_atom_value(j, m, l, value);  
+          }
         }
+      }
     }
-
     fix_bond_history->post_neighbor();
   }
-  
 }
 
 /* ---------------------------------------------------------------------- */
@@ -379,7 +454,6 @@ void FixBondRupture::post_integrate()
     // If per/bond data, get style modifiers from bondstore
     if (flag_table || flag_distibution) {
         // get style modifiers from bondstore
-
         if (flag_dist) {
             rcritsq = bondstore[n][0]*bondstore[n][0];
         } else if (flag_fraction){
@@ -772,4 +846,25 @@ void FixBondRupture::bcast_table(Table *tb) // *UPDATED
   MPI_Bcast(tb->iatomfile, tb->ninput, MPI_INT, 0, world);
   MPI_Bcast(tb->jatomfile, tb->ninput, MPI_INT, 0, world);
   MPI_Bcast(tb->datafile, ndata * tb->ninput, MPI_DOUBLE, 0, world);
+}
+
+/* ----------------------------------------------------------------------
+   return a number sampled from the cdf given a random number in [0,1)
+------------------------------------------------------------------------- */
+
+double FixBondRupture::sample_cdf(int l, double u) 
+{
+    if (strcmp(dist_type,"uniform") == 0 ) {
+        return lo[l] + u * (hi[l] - lo[l]);
+    } else if (strcmp(dist_type,"normal") == 0) {
+        // Box-Muller transform
+        double z0 = sqrt(-2.0 * log(u)) * cos(2.0 * M_PI * u);
+        return mu[l] + z0 * sigma[l];
+    } else if (strcmp(dist_type,"exponential") == 0) {
+        return -log(1-u)/lambda[l];
+    } else if (strcmp(dist_type,"weibull") == 0) {
+        return alpha[l] * pow(-log(1-u), 1.0/beta[l]);
+    } else {
+        return 0.0;
+    }
 }

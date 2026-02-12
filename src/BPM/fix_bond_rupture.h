@@ -49,9 +49,14 @@ class FixBondRupture : public Fix {
   // Pointers for random numbers
   class RanMars *random;
 
+  // parameters for pdf styles
+  double *lo, *hi, *mu, *sigma, *lambda, *alpha, *beta;
+  int *use_dist;
+  char *dist_type;
+
   // Default arguments
   int btype, seed;
-  double rcritsq, p_fraction, k0, f0, ks0, kc0, fs0, fc0;
+  double rcrit, rcritsq, p_fraction, k0, f0, ks0, kc0, fs0, fc0;
 
   // Flags for styles
   int flag_dist, flag_fraction, flag_slip, flag_slip_catch, flag_rate;
@@ -62,6 +67,7 @@ class FixBondRupture : public Fix {
   // Internal methods/functions
   void store_data();
   double store_bond(int, int, int);
+  double sample_cdf(int, double);
 
   void process_broken(int, int);
   void update_special();
