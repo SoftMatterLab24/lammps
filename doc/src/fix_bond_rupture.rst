@@ -40,11 +40,19 @@ Syntax
        *bond/table* values = filename key
          filename = file containing the tablulated per/bond style args
          key = section of filename to start reading
-       *bond/distribution* values = dist_type params
-         dist_type = *gauss* or *exponential* or *weibull*
-            gauss params =
-            exponential params = 
-            weibull params = 
+       *bond/distribution* values = dist_type style_arg params
+         dist_type = *uniform* or *gauss* or *exponential* or *weibull*
+            uniform params = lo hi
+               lo = lower bound value of style_arg
+               hi = upper bound value of style_arg
+            gauss params =  mu sigma
+               mu = average value of style_arg
+               sigma = standard deviation of style_arg
+            exponential params = lambda
+               lambda = decay lengthscale of style_arg
+            weibull params = alpha beta
+               alpha = scale factor of style_arg
+               beta = shape factor of style_arg
        *critical* value = rcrit
             rcrit = enforce bonds longer than rcrit rupture (distance units)
    
@@ -55,6 +63,7 @@ Examples
 
    fix 5 all bond/rupture 1 dist 0.3
    fix 5 all bond/rupture 2 prob/fraction 0.3 12345 bond/table rupture.table start critical 0.3
+   fix 5 all bond/rupture 1 prob/slip 0.2 1.0 bond/distribution gauss ks0 0.2 2.0 f0 1.0 1.0 
 
 Description
 """""""""""
@@ -126,11 +135,22 @@ be used with *bond/distribution* keyword
 
 The *bond/distribution* keyword allows a unique rupture criterion to be
 defined on a per bond basis, by drawing certain style arguments
-from a defined distribution type. The argument drawn, depends on the
+from a defined distribution type. To distribute and argument, the
+argument is specified followed by the parameters that define the
+distribution. For example, with distribution *Gauss* and rupture 
+style *dist* each bond will have a value *rcrit* drawn from a normal
+distribution with mean :math:`\mu` and standard deviation :math:`\sigma`.
+One or many arguments can be drawn, each from unique distributions, although
+the distribution type cannot be changed. Note that not all style arguments
+can be drawn from the distibution, for example *seed* in the *prob/fraction*
+style is set globally. The *bond/distribution* keyword cannot
+be used with *bond/table* keyword.
+
+The argument drawn, depends on the
 rupture style. For instance with distribution *Gauss* and rupture 
-style *dist* the  value *rcrit* is drawn with mean :math:`\mu` and 
+style *dist* the value *rcrit* is drawn with mean :math:`\mu` and 
 standard deviation :math:`\sigma`. Note that not all style arguments
-will be drawn from the distibution, for example *seed* in the *prob/fraction*
+can be drawn from the distibution, for example *seed* in the *prob/fraction*
 style is set globally. The *bond/distribution* keyword cannot
 be used with *bond/table* keyword.
 
