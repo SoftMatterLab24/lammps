@@ -70,7 +70,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   flag_dist = 0; flag_fraction = 0; flag_slip = 0; flag_slip_catch = 0; flag_rate = 0;
   
   // keyword flags:
-  flag_table = 0; flag_distibution = 0; flag_crit = 0;
+  flag_table = 0; flag_distribution = 0; flag_crit = 0;
 
   btype = utils::inumeric(FLERR,arg[3],false,lmp);
   const char *style_name = arg[4];
@@ -79,8 +79,8 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   if (btype < 1 || btype > atom->nbondtypes)
   error->all(FLERR,"Invalid bond type in fix bond/rupture command");
 
-  int iarg = 5;
-  // Parse style-specific values
+    int iarg = 5;
+    // Parse style-specific values
     if (strcmp(style_name,"dist") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
         flag_dist = 1; param_names = {"rcrit"};
@@ -152,9 +152,9 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
       iarg += 3;
     } else if (strcmp(arg[iarg],"bond/distribution") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-      flag_distibution = 1;
+      flag_distribution = 1;
       
-      dist_type = arg[iarg+1];
+      dist_type = utils::strdup(arg[iarg+1]);
       
       int need = 0; // the number of distribution parameters needed for this distribution style
       if (strcmp(dist_type,"uniform") == 0 ) {
@@ -168,10 +168,10 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
       } else error->all(FLERR,"Illegal fix bond/rupture command");
 
       iarg += 2;
-      
-      // parse distribution parameters for each style parameter index until run out of args or hit another keyword
-      while (iarg < narg && (strcmp(arg[iarg + 1],"bond/table") == 0 || strcmp(arg[iarg + 1],"critical") == 0)) {
 
+      // parse distribution parameters for each style parameter index until run out of args or hit another keyword
+      while (iarg < narg && !(strcmp(arg[iarg],"bond/table") == 0 || strcmp(arg[iarg],"critical") == 0)) {
+    
         // must be a known parameter name for this rupture style
         auto it = pindex.find(arg[iarg]);
         if (it == pindex.end())
@@ -207,20 +207,20 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
             iarg += 3;
         } else error->all(FLERR,"Illegal fix bond/rupture command");
       }
-    } else if (strcmp(arg[iarg],"bond/crit") == 0) {
+    } else if (strcmp(arg[iarg],"critical") == 0) {
      if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
       flag_crit = 1;
       double rcrit = utils::numeric(FLERR,arg[iarg+1],false,lmp);
       if (rcrit < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
       rcritsq = rcrit*rcrit;
       iarg += 2;
-    } else error->all(FLERR,"Illegal fix bond/rupture command");
+    } else error->all(FLERR,"Illegal fix bond/rupture command"); 
   }
 
   // initialize Marsaglia RNG with processor-unique seed
   random = new RanMars(lmp,seed + me); 
 
-  if (flag_table && flag_distibution)
+  if (flag_table && flag_distribution)
     error->all(FLERR,"Cannot use argument bond/table with argument bond/distribution");
  
   // Set forward communication size
@@ -228,7 +228,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
 
   // create a unique id for this fix's private bond history instance
   update_flag = 1;
-  id_fix_bond_history = utils::strdup(fmt::format("HISTORY_BOND_RUPTURE_{}", instance_total));
+  id_fix_bond_history_rupture = utils::strdup(fmt::format("HISTORY_BOND_RUPTURE_{}", instance_total));
   
 }
 
@@ -236,8 +236,9 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
 
 FixBondRupture::~FixBondRupture()
 {
-  if (fix_bond_history && modify->nfix) modify->delete_fix(id_fix_bond_history);
-  delete[] id_fix_bond_history;
+  if (fix_bond_history && modify->nfix) modify->delete_fix(id_fix_bond_history_rupture);
+  delete[] id_fix_bond_history_rupture;
+  if (dist_type) delete[] dist_type;
   if (setflag) memory->destroy(setflag);
   if (tabindex) memory->destroy(tabindex);
 
@@ -270,11 +271,14 @@ void FixBondRupture::init()
     if (btype >= 1 && btype <= atom->nbondtypes) setflag[btype] = 1;
   }
 
-  // Create private BOND_HISTORY fix if not yet created
+  // Create private BOND_HISTORY_RUPTURE fix if not yet created
   if (!fix_bond_history) {
-    Fix *f = modify->add_fix(fmt::format("{} all BOND_HISTORY {} {}", id_fix_bond_history, update_flag, ndata), 1);
+    Fix *f = modify->add_fix(fmt::format("{} all BOND_HISTORY {} {}", id_fix_bond_history_rupture, update_flag, ndata), 1);
     fix_bond_history = dynamic_cast<FixBondHistory *>(f);
   }
+
+  // All histories
+  histories = modify->get_fix_by_style("BOND_HISTORY");
 
   if (fix_bond_history) fix_bond_history->setflag = setflag;
 }
@@ -337,6 +341,7 @@ double FixBondRupture::store_bond(int n, int i, int j)
 void FixBondRupture::store_data()
 {
   int i, j, n, m, type;
+  int i1, i2;
   int iatom, jatom, ia, ja;
   double delx, dely, delz, r;
   double **x = atom->x;
@@ -349,7 +354,7 @@ void FixBondRupture::store_data()
   tagint **bond_atom = atom->bond_atom;
 
   // if per/bond data store
-  if (flag_table || flag_distibution) {
+  if (flag_table || flag_distribution) {
 
     // Initialize bondstore by looping over the bondlist
     for (i = 0; i < atom->nlocal; i++) {
@@ -371,30 +376,65 @@ void FixBondRupture::store_data()
         
           const Table *tb = &tables[tabindex[type]];
 
+          int table_idx = -1;
           for (n = 0; n < tb->ninput; n++) {
             iatom = tb->iatomfile[n];
             jatom = tb->jatomfile[n];
             if ((iatom == ia && jatom == ja) || (iatom == ja && jatom == ia)) {
-                break; 
+              table_idx = n;
+              break; 
             }
           }
-
-          for (int l = 0; l < ndata; l++) {
-            double value = tb->datafile[n*ndata + l]; // pull value from table file for this bond and this data index
-            fix_bond_history->update_atom_value(j, m, l, value);  
+          
+          if (table_idx >= 0) {
+            // Find the bond in the global bondlist to get correct index
+            int bn = -1;
+            for (n = 0; n < nbondlist; n++) {
+              i1 = bondlist[n][0];
+              i2 = bondlist[n][1];
+              if ((tag[i1] == ia && tag[i2] == ja) || (tag[i1] == ja && tag[i2] == ia)) {
+                bn = n;
+                break;
+              }
+            }
+            
+            if (bn >= 0) {
+              for (int l = 0; l < ndata; l++) {
+                double value = tb->datafile[table_idx*ndata + l];
+                fix_bond_history->update_atom_value(i, m, l, value);
+                bondstore[bn][l] = value;  
+              }
+            }
           }
         }
         
         // if distribution style, grab from distribution
-        if (flag_distibution) { 
-          for (int l = 0; l < ndata; l++) {
+        if (flag_distribution) { 
+          // tags of atoms 
+          ia = atom->tag[i];
+          ja = atom->tag[j];
+
+          // Find the bond in the global bondlist to get correct index
+          int bn = -1;
+          for (n = 0; n < nbondlist; n++) {
+            i1 = bondlist[n][0];
+            i2 = bondlist[n][1];
+            if ((tag[i1] == ia && tag[i2] == ja) || (tag[i1] == ja && tag[i2] == ia)) {
+              bn = n;
+              break;
+            }
+          }
+          
+          // Only update if bond was found in bondlist
+          if (bn >= 0) {
+            for (int l = 0; l < ndata; l++) {
               double value = 0.0;
               if (use_dist[l]) {
                   value = sample_cdf(l, random->uniform());
               } else {
                   // if not using distribution for this parameter, use the default value specified in the input script
                   if (flag_dist){
-                      value = rcritsq;
+                      value = rcrit;
                   } else if (flag_fraction){
                       value = p_fraction;
                   } else if (flag_slip){
@@ -405,7 +445,9 @@ void FixBondRupture::store_data()
                       value = k0;
                   }
               }
-              fix_bond_history->update_atom_value(j, m, l, value);  
+              fix_bond_history->update_atom_value(i, m, l, value);
+              bondstore[bn][l] = value;
+            }
           }
         }
       }
@@ -452,7 +494,7 @@ void FixBondRupture::post_integrate()
     }
 
     // If per/bond data, get style modifiers from bondstore
-    if (flag_table || flag_distibution) {
+    if (flag_table || flag_distribution) {
         // get style modifiers from bondstore
         if (flag_dist) {
             rcritsq = bondstore[n][0]*bondstore[n][0];
@@ -470,7 +512,10 @@ void FixBondRupture::post_integrate()
             k0 = bondstore[n][0];
         }     
     }
-
+    if (n == 200) {
+      //printf("In fix: Bond %d bondstore 0 is %f\n", n, bondstore[n][0]);
+    }
+    
     // Bond length
     double delx = x[i1][0] - x[i2][0];
     double dely = x[i1][1] - x[i2][1];
@@ -487,6 +532,7 @@ void FixBondRupture::post_integrate()
     // Modifiers to rupture probability based on style
     if (flag_dist){
         if (rsq >= rcritsq) {
+            printf("Checking bond (%d,%d) with r=%f against rcrit=%f\n", i1, i2, sqrt(rsq), sqrt(rcritsq));
             p_rupture = 1.0;
         }
     }
@@ -524,8 +570,8 @@ void FixBondRupture::post_integrate()
         }
     }
     
-    if (p_rupture < probability) continue; // bond does not rupture
-
+    if (p_rupture <= probability) continue; // bond does not rupture
+    //printf("Rupturing bond (%d,%d) with rupture probability %f and random number %f\n", i1, i2, p_rupture, probability);
     break_count = 1;
     bondlist[n][2] = 0;
     process_broken(i1, i2);
@@ -537,9 +583,9 @@ void FixBondRupture::post_integrate()
   if (break_all == 1) next_reneighbor = update->ntimestep;
   if (break_all == 0) return;
 
-  update_special();
-  comm->forward_comm(this);
-  update_topology();
+  //update_special();
+  //comm->forward_comm(this);
+  //update_topology();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -632,11 +678,72 @@ void FixBondRupture::update_topology()
     }
   }
 
-  new_broken_pairs.clear();
+  //new_broken_pairs.clear();
 }
 
 /* ---------------------------------------------------------------------- */
 
+void FixBondRupture::process_broken(int i, int j)
+{
+  
+  int nlocal = atom->nlocal;
+
+  //if (fix_update_special_bonds) {
+    // If this processor owns two copies of the bond (i.e. if the domain is periodic and 1 proc thick),
+    //   skip instance where larger tag (j) owned
+  //  int check = 1;
+  //  if (i >= nlocal) {
+  //    int imap = atom->map(atom->tag[i]);
+  //    if (imap < nlocal) check = 0;
+  //  }
+  //  if (check) fix_update_special_bonds->add_broken_bond(i, j);
+  //}
+
+  // Manually search and remove from atom arrays
+  // need to remove in case special bonds arrays rebuilt
+
+  int m, n;
+  tagint *tag = atom->tag;
+  tagint **bond_atom = atom->bond_atom;
+  int **bond_type = atom->bond_type;
+  int *num_bond = atom->num_bond;
+
+  if (i < nlocal) {
+    for (m = 0; m < num_bond[i]; m++) {
+      if (bond_atom[i][m] == tag[j] && setflag[bond_type[i][m]]) {
+        n = num_bond[i];
+        bond_type[i][m] = bond_type[i][n - 1];
+        bond_atom[i][m] = bond_atom[i][n - 1];
+        for (auto &ihistory : histories) {
+          auto *fix_bond_history2 = dynamic_cast<FixBondHistory *>(ihistory);
+          fix_bond_history2->shift_history(i, m, n - 1);
+          fix_bond_history2->delete_history(i, n - 1);
+        }
+        num_bond[i]--;
+        break;
+      }
+    }
+  }
+
+  if (j < nlocal) {
+    for (m = 0; m < num_bond[j]; m++) {
+      if (bond_atom[j][m] == tag[i] && setflag[bond_type[j][m]]) {
+        n = num_bond[j];
+        bond_type[j][m] = bond_type[j][n - 1];
+        bond_atom[j][m] = bond_atom[j][n - 1];
+        for (auto &ihistory : histories) {
+          auto *fix_bond_history2 = dynamic_cast<FixBondHistory *>(ihistory);
+          fix_bond_history2->shift_history(j, m, n - 1);
+          fix_bond_history2->delete_history(j, n - 1);
+        }
+        num_bond[j]--;
+        break;
+      }
+    }
+  }
+}
+
+/* 
 void FixBondRupture::process_broken(int i, int j)
 {
   auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
@@ -658,10 +765,10 @@ void FixBondRupture::process_broken(int i, int j)
         n = num_bond[i];
         bond_type[i][m] = bond_type[i][n - 1];
         bond_atom[i][m] = bond_atom[i][n - 1];
-        // Shift and delete from private bond history
-        if (fix_bond_history) {
-          fix_bond_history->shift_history(i, m, n - 1);
-          fix_bond_history->delete_history(i, n - 1);
+        for (auto &ihistory : histories) {
+          auto *fix_bond_history2 = dynamic_cast<FixBondHistory *>(ihistory);
+          fix_bond_history2->shift_history(i, m, n - 1);
+          fix_bond_history2->delete_history(i, n - 1);
         }
         num_bond[i]--;
         break;
@@ -675,10 +782,10 @@ void FixBondRupture::process_broken(int i, int j)
         n = num_bond[j];
         bond_type[j][m] = bond_type[j][n - 1];
         bond_atom[j][m] = bond_atom[j][n - 1];
-        // Shift and delete from private bond history
-        if (fix_bond_history) {
-          fix_bond_history->shift_history(j, m, n - 1);
-          fix_bond_history->delete_history(j, n - 1);
+        for (auto &ihistory : histories) {
+          auto *fix_bond_history2 = dynamic_cast<FixBondHistory *>(ihistory);
+          fix_bond_history2->shift_history(j, m, n - 1);
+          fix_bond_history2->delete_history(j, n - 1);
         }
         num_bond[j]--;
         break;
@@ -686,7 +793,7 @@ void FixBondRupture::process_broken(int i, int j)
     }
   }
 }
-
+*/
 /* ---------------------------------------------------------------------- */
 
 int FixBondRupture::pack_forward_comm(int n, int *list, double *buf,
@@ -853,18 +960,35 @@ void FixBondRupture::bcast_table(Table *tb) // *UPDATED
 ------------------------------------------------------------------------- */
 
 double FixBondRupture::sample_cdf(int l, double u) 
-{
+{   
+
+  for (int attempt = 0; attempt < 1000; ++attempt) {
+    double x = 0.0;
+
     if (strcmp(dist_type,"uniform") == 0 ) {
-        return lo[l] + u * (hi[l] - lo[l]);
-    } else if (strcmp(dist_type,"normal") == 0) {
-        // Box-Muller transform
-        double z0 = sqrt(-2.0 * log(u)) * cos(2.0 * M_PI * u);
-        return mu[l] + z0 * sigma[l];
+      x = lo[l] + u * (hi[l] - lo[l]);
+    } else if (strcmp(dist_type,"gauss") == 0) {
+
+      // Use two independent uniforms; clamp u1 away from 0
+      double u2 = random->uniform(); // need to draw second random number for Box-Muller
+    
+      if (u < 1.0e-12) u = 1.0e-12;
+
+      double z0 = sqrt(-2.0 * log(u)) * cos(2.0 * M_PI * u2);
+      x  = mu[l] + sigma[l] * z0;
+  
     } else if (strcmp(dist_type,"exponential") == 0) {
-        return -log(1-u)/lambda[l];
+      x = -log(1-u)/lambda[l];
     } else if (strcmp(dist_type,"weibull") == 0) {
-        return alpha[l] * pow(-log(1-u), 1.0/beta[l]);
+        x = alpha[l] * pow(-log(1-u), 1.0/beta[l]);
     } else {
-        return 0.0;
+        error->all(FLERR,"Illegal distribution type in fix bond/rupture");
     }
+
+    // Accept only finite, non-negative values
+    if (std::isfinite(x) && x > 0.0) return x;
+  }
+
+  error->all(FLERR,"Failed to sample valid bond parameter");
+  return 0.0; 
 }

@@ -236,6 +236,11 @@ void BondBPMPoly::compute(int eflag, int vflag)
     r0 = bondstore[n][0]; 
 
     const Table *tb = &tables[tabindex[type]];
+    
+    if (n == 200) {
+      //printf("In compute: Bond %d bondstore 0 is %f\n", n, bondstore[n][0]);
+    }
+    
 
     // Ensure pair is always ordered to ensure numerical operations
     // are identical to minimize the possibility that a bond straddling

@@ -39,8 +39,11 @@ class FixBondRupture : public Fix {
 
   // pointer to shared bond history fix (if created)
   class FixBondHistory *fix_bond_history = nullptr;
-  char *id_fix_bond_history = nullptr;
+  char *id_fix_bond_history_rupture = nullptr;
   char *id_fix_dummy_history = nullptr;
+
+  int n_histories;
+  std::vector<Fix *> histories;
 
   // internal bondstore bookkeeping (delegated to FixBondHistory)
   int updated_bond_flag = 0;
@@ -62,7 +65,7 @@ class FixBondRupture : public Fix {
   int flag_dist, flag_fraction, flag_slip, flag_slip_catch, flag_rate;
 
   // Flags for keywords
-  int flag_table, flag_distibution, flag_crit;
+  int flag_table, flag_distribution, flag_crit;
 
   // Internal methods/functions
   void store_data();
