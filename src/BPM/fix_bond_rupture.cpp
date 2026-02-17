@@ -51,8 +51,8 @@ using namespace FixConst;
 
 FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
-  partner(nullptr), distsq(nullptr), bprob(nullptr),
-  random(nullptr), id_fix_bond_history_rupture(nullptr), id_fix_update_special_bonds_rupture(nullptr)
+  bprob(nullptr), random(nullptr), 
+  id_fix_bond_history_rupture(nullptr), id_fix_update_special_bonds_rupture(nullptr)
 {
   if (narg < 5) error->all(FLERR,"Illegal fix bond/rupture command");
 
@@ -73,7 +73,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   flag_dist = 0; flag_fraction = 0; flag_slip = 0; flag_slip_catch = 0; flag_rate = 0;
   
   // keyword flags:
-  flag_table = 0; flag_distribution = 0; flag_crit = 0;
+  flag_table = 0; flag_distribution = 0; flag_crit = 0, flag_prob = 0;
 
   btype = utils::inumeric(FLERR,arg[3],false,lmp);
   const char *style_name = arg[4];
@@ -94,14 +94,14 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         iarg += 1;
     } else if (strcmp(style_name,"prob/fraction") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_fraction = 1; param_names = {"fraction"};
+        flag_fraction = 1; flag_prob = 1; param_names = {"fraction"};
         p_fraction = utils::numeric(FLERR,arg[iarg],false,lmp);
         if (p_fraction < 0.0 || p_fraction > 1.0) error->all(FLERR,"Illegal fix bond/rupture command");
         ndata = 1;
         iarg += 1;
     } else if (strcmp(style_name,"prob/slip") == 0) {
         if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_slip = 1; param_names = {"ks0","f0"};
+        flag_slip = 1; flag_prob = 1; param_names = {"ks0","f0"};
         k0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         f0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (k0 < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
@@ -109,7 +109,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         iarg += 2;
     } else if (strcmp(style_name,"prob/slip/catch") == 0) {
         if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_slip_catch = 1; param_names = {"ks0","kc0","fs0","fc0"};
+        flag_slip_catch = 1; flag_prob = 1; param_names = {"ks0","kc0","fs0","fc0"};
         ks0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         kc0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         fs0 = utils::numeric(FLERR,arg[iarg+2],false,lmp);
@@ -119,7 +119,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         iarg += 4;
     } else if (strcmp(style_name,"prob/rate") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_rate = 1; param_names = {"kr"};
+        flag_rate = 1; flag_prob = 1; param_names = {"kr"};
         k0 = utils::numeric(FLERR,arg[iarg],false,lmp);
         ndata = 1;
         iarg += 1;
@@ -135,7 +135,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
     beta = new double[ndata];
 
     use_dist = new int[ndata];
-    for (int i = 0; i < ndata; ++i) use_dist[i] = 0;   // 0 = deterministic, 1 = draw from distribution
+    for (int i = 0; i < ndata; ++i) use_dist[i] = 0;   // 0 = global deterministic, 1 = draw from distribution
 
     // Create a mapping of parameter name to index for lookup when parsing keyword args
     std::unordered_map<std::string,int> pindex;
@@ -228,7 +228,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   if (flag_table && flag_distribution)
     error->all(FLERR,"Cannot use argument bond/table with argument bond/distribution");
  
-  // Set forward communication size (default)
+  // Set forward communication size (defaults)
   comm_forward = 1;
   comm_reverse = 1;
 
@@ -248,8 +248,6 @@ FixBondRupture::~FixBondRupture()
 {
   delete random;
 
-  memory->destroy(partner);
-  memory->destroy(distsq);
   memory->destroy(bprob);
   
   if (fix_bond_history && modify->nfix) modify->delete_fix(id_fix_bond_history_rupture);
@@ -289,7 +287,7 @@ void FixBondRupture::init()
     if (btype >= 1 && btype <= atom->nbondtypes) setflag[btype] = 1;
   }
 
-  // Create private BOND_HISTORY_RUPTURE fix if not yet created
+  // Create BOND_HISTORY_RUPTURE fix if not yet created
   if (!fix_bond_history) {
     Fix *f1 = modify->add_fix(fmt::format("{} all BOND_HISTORY {} {}", id_fix_bond_history_rupture, update_flag, ndata), 1);
     fix_bond_history = dynamic_cast<FixBondHistory *>(f1);
@@ -316,7 +314,7 @@ void FixBondRupture::init()
 /* ---------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-  Store data for a single bond - if bond added after LAMMPS init (e.g. pour)
+  Store data for a single bond - if bond added after LAMMPS init (e.g. pour) (DEPRECIATED)
 ------------------------------------------------------------------------- */
 
 double FixBondRupture::store_bond(int n, int i, int j)
@@ -337,9 +335,6 @@ double FixBondRupture::store_bond(int n, int i, int j)
   delz = x[i][2] - x[j][2];
 
   r = sqrt(delx * delx + dely * dely + delz * delz);
-  
-  // Disable store_bond
-  //bondstore[n][0] = r; // temporary to test
 
   if (i < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[i]; m++) {
@@ -454,12 +449,8 @@ void FixBondRupture::store_data()
             if (use_dist[l]) {
               key = std::min(ia,ja)*natoms + std::max(ia,ja);
               value = sample_cdf(key, l);
-
-              //printf("On proc %d, bond pair (%d %d) generated value %f\n",me,ia,ja,value);
-              printf("%f\n",value);
-              //double u = bond_uniform(key, l);
             } else {
-              // if not using distribution for this parameter, use the default value specified in the input script
+              // if not using distribution for this parameter, use the default value specified in args
               if (flag_dist){
                 value = rcrit;
               } else if (flag_fraction){
@@ -484,84 +475,10 @@ void FixBondRupture::store_data()
 
 /* ---------------------------------------------------------------------- */
 
-/* 
-void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
-{
-
-  // On first call, initialize stored bond data
-  if (!fix_bond_history->stored_flag) {
-    fix_bond_history->stored_flag = true;
-    store_data();
-  }
-  
-  int i1, i2, itmp, type, i, j, m, n;
-  double **x = atom->x;
-  Bond *bond = force->bond;
-  tagint *tag = atom->tag;
-  int **bond_type = atom->bond_type;
-  int **bondlist = neighbor->bondlist;
-  int nbondlist = neighbor->nbondlist;
-  int nlocal = atom->nlocal;
-  double **bondstore = fix_bond_history->bondstore;
-  double r0;
-  double dt = (update->dt);
-
-  for (i = 0; i < atom->nlocal; i++) {
-      for (int m = atom->num_bond[i]-1; m >= 0; --m) {
-        type = bond_type[i][m];
-
-        if (type < 0) continue;
-
-        // map to find index n
-        j = atom->map(atom->bond_atom[i][m]);
-        if (j < 0) {
-          error->one(FLERR, "Bond partner missing as ghost for atom {} partner tag {}. "
-                            "Increase comm ghost range (comm_modify cutoff) or ensure bonded ghosts are communicated.",
-                     (bigint) atom->tag[i], (bigint) atom->bond_atom[i][m]);
-        }
-
-        i1 = tag[i];
-        i2 = tag[j];
-
-        //if (i1 > i2) {
-        //  itmp = i;
-        //  i = j;
-        //  j = itmp;
-        //}
-
-        // Find the bond in the global bondlist to get correct index
-        //int bn = -1;
-        //for (n = 0; n < nbondlist; n++) {
-        //  int bi1 = bondlist[n][0];
-        //  int bi2 = bondlist[n][1];
-        //  if ((tag[bi1] == i1 && tag[bi2] == i2) || (tag[bi1] == i2 && tag[bi2] == i1)) {
-        //    bn = n;
-        //    break;
-        //  }
-        //}
-
-        rcritsq = 22*22; // temporary for testing
-        
-
-        // Bond length
-        double delx = x[i][0] - x[j][0];
-        double dely = x[i][1] - x[j][1];
-        double delz = x[i][2] - x[j][2];
-        domain->minimum_image(FLERR, delx, dely, delz);
-        double rsq = delx*delx + dely*dely + delz*delz;
-        if (rsq > rcritsq) {
-          printf("Checking bond (%d,%d) with r=%f against rcrit=%f\n", i1, i2, sqrt(rsq), sqrt(rcritsq));
-          //bond_type[i][m] = 0;
-          process_broken(i, j);
-        }
-      }
-  }
-
-  */
  void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
  {
 
-  // On first call, initialize stored bond data
+  // On first call, initialize stored per/bond data
   if (!fix_bond_history->stored_flag) {
     fix_bond_history->stored_flag = true;
     store_data();
@@ -569,8 +486,10 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
   
   int i1, i2, itmp, type, i, j, m, n;
   double **x = atom->x;
-  tagint *tag = atom->tag;
+  int nlocal = atom->nlocal;
+  int nall = atom->nlocal + atom->nghost;
   int *num_bond = atom->num_bond;
+  tagint *tag = atom->tag;
   tagint **bond_atom = atom->bond_atom;
 
   Bond *bond = force->bond;
@@ -581,54 +500,49 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
   double r0;
   double dt = (update->dt);
 
-
-  maxbond = atom->bond_per_atom;
-  if (atom->nmax > nmax) {
-    memory->destroy(bprob);
-    nmax = atom->nmax;
-
-    memory->create(bprob, nmax, maxbond, "fix_bond_rupture:bprob");
-  }
-
-  int nlocal = atom->nlocal;
-  int nall = atom->nlocal + atom->nghost;
-
-  for (i = 0; i < nall; i++) {
-    for (int m = 0; m < maxbond; m++)
-      bprob[i][m] = 0.0;
-  }
-
-  comm_forward = 1 + 2*maxbond;
-
-  // reverse comm of partner info
-  //if (force->newton_bond) comm->reverse_comm(this);
-
-  // each atom now knows its partner
-  // for prob check, generate random value for each atom with a bond partner
-  // forward comm of partner and random value, so ghosts have it
-  for (i = 0; i < nlocal; i++){
-    for (int m = 0; m < num_bond[i]; m++) {
-      int type = bond_type[i][m];
-      if (type < 0) continue;          // turned off
-      if (type != btype) continue;
-
-      i1 = tag[i];
-      i2 = bond_atom[i][m];
-
-      if (i1 < i2) {
-        bprob[i][m] = random->uniform();
-        //printf("Assigned probability %f\n",bprob[i][m]);
-      } else {
-        // Nothing
+  // If using probabilistic rupture draw uniform random number
+  if (flag_prob) {
+    maxbond = atom->bond_per_atom;
+    if (atom->nmax > nmax) {
+      memory->destroy(bprob);
+      nmax = atom->nmax;
+  
+      memory->create(bprob, nmax, maxbond, "fix_bond_rupture:bprob");
+    }
+  
+    // Initialize/resize bond probability array
+    for (i = 0; i < nall; i++) {
+      for (int m = 0; m < maxbond; m++)
+        bprob[i][m] = 0.0;
+    }
+  
+    comm_forward = 1 + 2*maxbond;
+  
+    // For each locally owned atom, 
+    // generate random value for each atom with a bond
+    // forward comm of partner and random value, so ghosts have it
+    for (i = 0; i < nlocal; i++){
+      for (int m = 0; m < num_bond[i]; m++) {
+        int type = bond_type[i][m];
+        if (type < 0) continue;          // turned off
+        if (type != btype) continue;
+  
+        i1 = tag[i];
+        i2 = bond_atom[i][m];
+  
+        if (i1 < i2) {
+          bprob[i][m] = random->uniform();
+        } else {
+          // Nothing
+        }
       }
     }
+  
+    commflag = 1;
+    comm->forward_comm(this);
+    commflag = 0;
   }
-
-  commflag = 1;
-  comm->forward_comm(this);
-  commflag = 0;
-
-  ////////
+  
 
   for (n = 0; n < nbondlist; n++) {
     if (bondlist[n][2] <= 0) continue;
@@ -645,9 +559,23 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
       i2 = itmp;
     }
 
-    if (i1 >= atom->nlocal) {
-      printf("Skipping unowned atom\n");
-      continue; // only proc that owns it
+    if (i1 >= atom->nlocal) continue; 
+
+    // Get bond probability if using
+    probability = 0.0;
+    if (flag_prob) {
+      int b = -1;
+      int nb = atom->num_bond[i1];
+      if (nb > maxbond) nb = maxbond;
+  
+      for (m = 0; m < nb; m++) {
+        if (atom->bond_atom[i1][m] == tag[i2]) {
+          b = m; break;
+        }
+      }
+  
+      if (b < 0) continue;
+      probability = bprob[i1][b];
     }
 
     // If per/bond data, get style modifiers from bondstore
@@ -680,25 +608,9 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
     // Rupture probability
     double p_rupture = 0.0; // default to no rupture
 
-    // Get random number from bondlist
-    probability = 0;
-    int b = -1;
-    int nb = atom->num_bond[i1];
-    if (nb > maxbond) nb = maxbond;
-
-    for (m = 0; m < nb; m++) {
-      if (atom->bond_atom[i1][m] == tag[i2]) {
-        b = m; break;
-      }
-    }
-
-    if (b < 0) continue;
-    probability = bprob[i1][b];
-    
     // Modifiers to rupture probability based on style
     if (flag_dist){
         if (rsq >= rcritsq) {
-            printf("Checking bond (%d,%d) with r=%f against rcrit=%f\n", i1, i2, sqrt(rsq), sqrt(rcritsq));
             p_rupture = 1.0;
         }
     }
@@ -736,135 +648,20 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
         }
     }
     
-    //printf("Bond has fixed p_rupture %f and current prob %f \n",p_rupture,probability);
+    // Check the probability constraint
     if (p_rupture <= probability) continue; // bond does not rupture
-   
-    //printf("Bond broke with fixed p_rupture %f and current prob %f \n",p_rupture,probability);
-    // If we own the lower-tagged atom, count this bond break
-    //if (atom->tag[i1] < atom->tag[i2]) {
-    //  nbreak++;
-    //  //printf("Proc %d: Rupture decision - breaking bond (%d,%d), nbreak now = %d\n",comm->me, tag1, tag2, nbreak);
-    //}
-
     
     bondlist[n][2] = 0;
     process_broken(i1, i2);
   }
   
   next_reneighbor = update->ntimestep;
-
-  // tally stats 
-  //MPI_Allreduce(&nbreak,&breakcount,1,MPI_INT,MPI_SUM,world);
-  //atom->nbonds -= breakcount;
-
-  //if (breakcount) next_reneighbor = update->ntimestep;
-  //if (!breakcount) return;
-
-  //update_special();
-  //comm->forward_comm(this);
-
-  //update_topology();
-}
-
-/* ---------------------------------------------------------------------- */
-
-void FixBondRupture::update_special()
-{
-  int i, j, m, n1;
-  tagint tagi, tagj;
-  int nlocal = atom->nlocal;
-
-  tagint *slist;
-  int **nspecial = atom->nspecial;
-  tagint **special = atom->special;
-
-  for (auto const &it : new_broken_pairs) {
-    tagi = it.first;
-    tagj = it.second;
-    i = atom->map(tagi);
-    j = atom->map(tagj);
-
-    if (i < 0 || j < 0) {
-      error->one(FLERR,"Fix bond/rupture needs ghost atoms from further away");
-    }
-
-    if (i < nlocal) {
-      slist = special[i];
-      n1 = nspecial[i][0];
-      for (m = 0; m < n1; m++)
-        if (slist[m] == tagj) break;
-      for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
-      nspecial[i][0]--;
-      nspecial[i][1] = nspecial[i][2] = nspecial[i][0];
-    }
-
-    if (j < nlocal) {
-      slist = special[j];
-      n1 = nspecial[j][0];
-      for (m = 0; m < n1; m++)
-        if (slist[m] == tagi) break;
-      for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
-      nspecial[j][0]--;
-      nspecial[j][1] = nspecial[j][2] = nspecial[j][0];
-    }
-  }
-}
-
-/* ---------------------------------------------------------------------- */
-
-void FixBondRupture::update_topology()
-{
-  int nlocal = atom->nlocal;
-  tagint *tag = atom->tag;
-
-  for (int ilist = 0; ilist < neighbor->nlist; ilist++) {
-    NeighList *list = neighbor->lists[ilist];
-    if (list->copy) continue;
-
-    int *numneigh = list->numneigh;
-    int **firstneigh = list->firstneigh;
-
-    for (auto const &it : new_broken_pairs) {
-      tagint tag1 = it.first;
-      tagint tag2 = it.second;
-      int i1 = atom->map(tag1);
-      int i2 = atom->map(tag2);
-
-      if (i1 < 0 || i2 < 0) {
-        error->one(FLERR,"Fix bond/rupture needs ghost atoms from further away");
-      }
-
-      if (i1 < nlocal) {
-        int *jlist = firstneigh[i1];
-        int jnum = numneigh[i1];
-        for (int jj = 0; jj < jnum; jj++) {
-          int j = jlist[jj];
-          j &= SPECIALMASK;
-          if (tag[j] == tag2) jlist[jj] = j;
-        }
-      }
-
-      if (i2 < nlocal) {
-        int *jlist = firstneigh[i2];
-        int jnum = numneigh[i2];
-        for (int jj = 0; jj < jnum; jj++) {
-          int j = jlist[jj];
-          j &= SPECIALMASK;
-          if (tag[j] == tag1) jlist[jj] = j;
-        }
-      }
-    }
-  }
-
-  new_broken_pairs.clear();
 }
 
 /* ---------------------------------------------------------------------- */
 
 void FixBondRupture::process_broken(int i, int j)
 {
-  //auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
-  //new_broken_pairs.push_back(tag_pair);
 
   int nlocal = atom->nlocal;
   if (fix_update_special_bonds) {
@@ -1113,7 +910,7 @@ void FixBondRupture::bcast_table(Table *tb) // *UPDATED
 }
 
 /* ----------------------------------------------------------------------
-   return a number sampled from the cdf given a random number in [0,1)
+   return a number sampled from the cdf given a unique (i,j) pair key
 ------------------------------------------------------------------------- */
 
 double FixBondRupture::sample_cdf(long int key, int l) 
@@ -1151,6 +948,10 @@ double FixBondRupture::sample_cdf(long int key, int l)
   return 0.0; 
 }
 
+/* ----------------------------------------------------------------------
+    Psuedo-random uniform number generator given pair key, index, and global seed
+  ------------------------------------------------------------------------- */
+
 double FixBondRupture::bond_uniform(long int key, int l)
 {
   // 32-bit seed from key and l
@@ -1159,7 +960,7 @@ double FixBondRupture::bond_uniform(long int key, int l)
 
   x ^= static_cast<uint32_t>(seed) * 0x9E3779B9u;
 
-  // Mix key and l (simple avalanche hash)
+  // Mix key and l (avalanche hash)
   x = x ^ (y * 0x9E3779B9u);
   x = x ^ (x >> 16);
   x = x * 0x7FEB352Du;

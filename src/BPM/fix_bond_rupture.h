@@ -37,14 +37,10 @@ class FixBondRupture : public Fix {
 
  protected:
   int me, nprocs, ndata, update_flag;
-  double cutoff, cutsq;
 
-  int nbreak;
   int commflag;
   int nmax, maxbond;
   double probability;
-  tagint *partner;
-  double *distsq;
   double **bprob;
 
   // pointer to shared bond history fix (if created)
@@ -77,7 +73,7 @@ class FixBondRupture : public Fix {
   int flag_dist, flag_fraction, flag_slip, flag_slip_catch, flag_rate;
 
   // Flags for keywords
-  int flag_table, flag_distribution, flag_crit;
+  int flag_table, flag_distribution, flag_crit, flag_prob;
 
   // Internal methods/functions
   void store_data();
@@ -86,17 +82,11 @@ class FixBondRupture : public Fix {
   double bond_uniform(long int, int);
 
   void process_broken(int, int);
-  void update_special();
-  void update_topology();
-
-  void process_broken_tags(tagint tagi, tagint tagj);
-  void delete_bond_endpoint(int i, tagint partner_tag);
   
   // Define struct for bond table
   struct Table {
    int ninput;
    int *iatomfile, *jatomfile;
-   double lo, hi;
    double *datafile;
    double *data;
   };
@@ -109,10 +99,6 @@ class FixBondRupture : public Fix {
   void read_table(Table *, char *, char *);
   void bcast_table(Table *);
   void param_extract(Table *, char *);
-
-  // Create an array to store bonds broken this timestep (new)
-  // and since the last neighbor list build
-  std::vector<std::pair<tagint, tagint>> new_broken_pairs;
 
 };
 
