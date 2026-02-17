@@ -30,17 +30,23 @@ class FixBondRupture : public Fix {
   //   void post_constructor() override;
   int setmask() override;
   void init() override;
-  void post_integrate() override;
+  //void post_integrate() override;
+  void pre_force(int) override;
   int pack_forward_comm(int, int *, double *, int, int *) override;
   void unpack_forward_comm(int, int, double *) override;
 
  protected:
   int me, nprocs, ndata, update_flag;
 
+  int nbreak, breakcount;
+  tagint *finalpartner;
+  int nmax_finalpartner;
+
   // pointer to shared bond history fix (if created)
   class FixBondHistory *fix_bond_history = nullptr;
+  class FixUpdateSpecialBonds *fix_update_special_bonds = nullptr;
   char *id_fix_bond_history_rupture = nullptr;
-  char *id_fix_dummy_history = nullptr;
+  char *id_fix_update_special_bonds_rupture = nullptr;
 
   int n_histories;
   std::vector<Fix *> histories;
@@ -55,6 +61,7 @@ class FixBondRupture : public Fix {
   // parameters for pdf styles
   double *lo, *hi, *mu, *sigma, *lambda, *alpha, *beta;
   int *use_dist;
+  double *dist_data;
   char *dist_type;
 
   // Default arguments
@@ -75,6 +82,9 @@ class FixBondRupture : public Fix {
   void process_broken(int, int);
   void update_special();
   void update_topology();
+
+  void process_broken_tags(tagint tagi, tagint tagj);
+  void delete_bond_endpoint(int i, tagint partner_tag);
   
   // Define struct for bond table
   struct Table {
