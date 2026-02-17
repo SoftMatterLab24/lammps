@@ -51,6 +51,7 @@ using namespace FixConst;
 
 FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
+  partner(nullptr), distsq(nullptr), bprob(nullptr),
   random(nullptr), id_fix_bond_history_rupture(nullptr), id_fix_update_special_bonds_rupture(nullptr)
 {
   if (narg < 5) error->all(FLERR,"Illegal fix bond/rupture command");
@@ -92,13 +93,12 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         ndata = 1;
         iarg += 1;
     } else if (strcmp(style_name,"prob/fraction") == 0) {
-        if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
+        if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
         flag_fraction = 1; param_names = {"fraction"};
         p_fraction = utils::numeric(FLERR,arg[iarg],false,lmp);
-        seed = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (p_fraction < 0.0 || p_fraction > 1.0) error->all(FLERR,"Illegal fix bond/rupture command");
         ndata = 1;
-        iarg += 2;
+        iarg += 1;
     } else if (strcmp(style_name,"prob/slip") == 0) {
         if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
         flag_slip = 1; param_names = {"ks0","f0"};
@@ -172,7 +172,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
       iarg += 2;
 
       // parse distribution parameters for each style parameter index until run out of args or hit another keyword
-      while (iarg < narg && !(strcmp(arg[iarg],"bond/table") == 0 || strcmp(arg[iarg],"critical") == 0)) {
+      while (iarg < narg && !(strcmp(arg[iarg],"bond/table") == 0 || strcmp(arg[iarg],"critical") == 0 || strcmp(arg[iarg],"seed") == 0)) {
     
         // must be a known parameter name for this rupture style
         auto it = pindex.find(arg[iarg]);
@@ -212,9 +212,12 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
     } else if (strcmp(arg[iarg],"critical") == 0) {
      if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
       flag_crit = 1;
-      double rcrit = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+      double rcrit_g = utils::numeric(FLERR,arg[iarg+1],false,lmp);
       if (rcrit < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
-      rcritsq = rcrit*rcrit;
+      rcritsq_g = rcrit_g*rcrit_g;
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"seed") == 0) {
+      seed = utils::numeric(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
     } else error->all(FLERR,"Illegal fix bond/rupture command"); 
   }
@@ -225,7 +228,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   if (flag_table && flag_distribution)
     error->all(FLERR,"Cannot use argument bond/table with argument bond/distribution");
  
-  // Set forward communication size
+  // Set forward communication size (default)
   comm_forward = 1;
   comm_reverse = 1;
 
@@ -234,16 +237,21 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   id_fix_bond_history_rupture = utils::strdup(fmt::format("HISTORY_BOND_RUPTURE_{}", instance_total));
 
   id_fix_update_special_bonds_rupture = utils::strdup(fmt::format("UPDATE_SPECIAL_BONDS_RUPTURE_{}", instance_total));
-  
-  // zero out stats
-  breakcount = 0;
-  
+
+  // allocate
+  nmax = 0;
 }
 
 /* ---------------------------------------------------------------------- */
 
 FixBondRupture::~FixBondRupture()
 {
+  delete random;
+
+  memory->destroy(partner);
+  memory->destroy(distsq);
+  memory->destroy(bprob);
+  
   if (fix_bond_history && modify->nfix) modify->delete_fix(id_fix_bond_history_rupture);
   if (id_fix_update_special_bonds_rupture && modify->nfix) modify->delete_fix(id_fix_update_special_bonds_rupture);
 
@@ -372,49 +380,13 @@ void FixBondRupture::store_data()
   int **bondlist = neighbor->bondlist;
   int nbondlist = neighbor->nbondlist;
   int nlocal = atom->nlocal;
+  tagint itag, jtag;
   tagint *tag = atom->tag;
   tagint **bond_atom = atom->bond_atom;
   int nbonds = atom->nbonds;
 
-  int me;
-  MPI_Comm_rank(world, &me);
-
-  //printf("Proc %d: Initializing distribution data for %d bonds\n", me, neighbor->nbondlist);
-  // If distribution style, generate random values for each bond and store in array
-  if (flag_distribution) {
-    if (me == 0) {
-      memory->create(dist_data, ndata*nbonds, "bond:distdata"); //memory->create(dist_data, ndata*atom->nbonds, "bond:distdata");
-      for (n = 0; n < nbonds; n++) {
-        
-        for (int l = 0; l < ndata; l++) {
-          double value = 0.0;
-          if (use_dist[l]) {
-            value = sample_cdf(l, random->uniform());
-          } else {
-            // if not using distribution for this parameter, use the default value specified in the input script
-            if (flag_dist){
-              value = rcrit;
-            } else if (flag_fraction){
-              value = p_fraction;
-            } else if (flag_slip){
-              value = k0;
-            } else if (flag_slip_catch){
-              value = ks0;
-            } else if (flag_rate){
-              value = k0;
-            }
-          }
-          dist_data[n*ndata + l] = value;
-        }
-      }
-    } else {
-      memory->create(dist_data, ndata*nbonds, "bond:distdata");
-    }
-
-    // All processors must participate in this broadcast
-    MPI_Bcast(dist_data, ndata*nbonds, MPI_DOUBLE, 0, world);
-  }  
-  
+  long int natoms = atom->natoms;
+  long int key;
 
   // Now if per/bond, store data
   if (flag_table || flag_distribution) {
@@ -477,24 +449,31 @@ void FixBondRupture::store_data()
           ia = atom->tag[i];
           ja = atom->tag[j];
 
-          // Find the bond in the global bondlist to get correct index
-          int bn = -1;
-          for (n = 0; n < nbondlist; n++) {
-            i1 = bondlist[n][0];
-            i2 = bondlist[n][1];
-            if ((tag[i1] == ia && tag[i2] == ja) || (tag[i1] == ja && tag[i2] == ia)) {
-              bn = n;
-              break;
-            }
-          }
-
-          double value = 0.0;
           for (int l = 0; l < ndata; l++) {
-            value = dist_data[bn*ndata + l];
+            double value = 0.0;
+            if (use_dist[l]) {
+              key = std::min(ia,ja)*natoms + std::max(ia,ja);
+              value = sample_cdf(key, l);
+
+              //printf("On proc %d, bond pair (%d %d) generated value %f\n",me,ia,ja,value);
+              printf("%f\n",value);
+              //double u = bond_uniform(key, l);
+            } else {
+              // if not using distribution for this parameter, use the default value specified in the input script
+              if (flag_dist){
+                value = rcrit;
+              } else if (flag_fraction){
+                value = p_fraction;
+              } else if (flag_slip){
+                value = k0;
+              } else if (flag_slip_catch){
+                value = ks0;
+              } else if (flag_rate){
+                value = k0;
+              }
+            }
             fix_bond_history->update_atom_value(i, m, l, value);
-            //printf("Storing bond (%d,%d) with distribution value %f for parameter index %d\n", ia, ja, value, l);
           }
-    
         }
       }
     }
@@ -590,15 +569,66 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
   
   int i1, i2, itmp, type, i, j, m, n;
   double **x = atom->x;
-  Bond *bond = force->bond;
   tagint *tag = atom->tag;
+  int *num_bond = atom->num_bond;
+  tagint **bond_atom = atom->bond_atom;
+
+  Bond *bond = force->bond;
   int **bond_type = atom->bond_type;
   int **bondlist = neighbor->bondlist;
   int nbondlist = neighbor->nbondlist;
-  int nlocal = atom->nlocal;
   double **bondstore = fix_bond_history->bondstore;
   double r0;
   double dt = (update->dt);
+
+
+  maxbond = atom->bond_per_atom;
+  if (atom->nmax > nmax) {
+    memory->destroy(bprob);
+    nmax = atom->nmax;
+
+    memory->create(bprob, nmax, maxbond, "fix_bond_rupture:bprob");
+  }
+
+  int nlocal = atom->nlocal;
+  int nall = atom->nlocal + atom->nghost;
+
+  for (i = 0; i < nall; i++) {
+    for (int m = 0; m < maxbond; m++)
+      bprob[i][m] = 0.0;
+  }
+
+  comm_forward = 1 + 2*maxbond;
+
+  // reverse comm of partner info
+  //if (force->newton_bond) comm->reverse_comm(this);
+
+  // each atom now knows its partner
+  // for prob check, generate random value for each atom with a bond partner
+  // forward comm of partner and random value, so ghosts have it
+  for (i = 0; i < nlocal; i++){
+    for (int m = 0; m < num_bond[i]; m++) {
+      int type = bond_type[i][m];
+      if (type < 0) continue;          // turned off
+      if (type != btype) continue;
+
+      i1 = tag[i];
+      i2 = bond_atom[i][m];
+
+      if (i1 < i2) {
+        bprob[i][m] = random->uniform();
+        //printf("Assigned probability %f\n",bprob[i][m]);
+      } else {
+        // Nothing
+      }
+    }
+  }
+
+  commflag = 1;
+  comm->forward_comm(this);
+  commflag = 0;
+
+  ////////
 
   for (n = 0; n < nbondlist; n++) {
     if (bondlist[n][2] <= 0) continue;
@@ -609,16 +639,15 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
 
     if (type != btype) continue;
 
-    // Only process if at least one atom is local (otherwise ghost-ghost pairs)
-    // DO NOT SWAP atoms - bondstore data is indexed with original atom order
-   
-    //if (atom->tag[i1] > atom->tag[i2]) continue;
-    //if (i1 >= nlocal && i2 >= nlocal) continue;
-
     if (tag[i2] < tag[i1]) {
       itmp = i1;
       i1 = i2;
       i2 = itmp;
+    }
+
+    if (i1 >= atom->nlocal) {
+      printf("Skipping unowned atom\n");
+      continue; // only proc that owns it
     }
 
     // If per/bond data, get style modifiers from bondstore
@@ -626,7 +655,6 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
         // get style modifiers from bondstore
         if (flag_dist) {
             rcritsq = bondstore[n][0]*bondstore[n][0];
-            rcritsq = 15*15;
         } else if (flag_fraction){
             p_fraction = bondstore[n][0]; 
         } else if (flag_slip){
@@ -652,9 +680,20 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
     // Rupture probability
     double p_rupture = 0.0; // default to no rupture
 
-    // Random number for stochastic rupture
-    //double probability = random->uniform();
-    double probability = 0; // test value for debugging
+    // Get random number from bondlist
+    probability = 0;
+    int b = -1;
+    int nb = atom->num_bond[i1];
+    if (nb > maxbond) nb = maxbond;
+
+    for (m = 0; m < nb; m++) {
+      if (atom->bond_atom[i1][m] == tag[i2]) {
+        b = m; break;
+      }
+    }
+
+    if (b < 0) continue;
+    probability = bprob[i1][b];
     
     // Modifiers to rupture probability based on style
     if (flag_dist){
@@ -692,18 +731,21 @@ void FixBondRupture::pre_force(int vflag)//FixBondRupture::post_integrate()
 
     // if dist overide is on, see if dist crit is met
     if (flag_crit){
-        if (rsq >= rcritsq) {
+        if (rsq >= rcritsq_g) {
             p_rupture = 1.0;
         }
     }
     
+    //printf("Bond has fixed p_rupture %f and current prob %f \n",p_rupture,probability);
     if (p_rupture <= probability) continue; // bond does not rupture
    
+    //printf("Bond broke with fixed p_rupture %f and current prob %f \n",p_rupture,probability);
     // If we own the lower-tagged atom, count this bond break
     //if (atom->tag[i1] < atom->tag[i2]) {
     //  nbreak++;
     //  //printf("Proc %d: Rupture decision - breaking bond (%d,%d), nbreak now = %d\n",comm->me, tag1, tag2, nbreak);
     //}
+
     
     bondlist[n][2] = 0;
     process_broken(i1, i2);
@@ -886,20 +928,27 @@ void FixBondRupture::process_broken(int i, int j)
 /* ---------------------------------------------------------------------- */
 
 int FixBondRupture::pack_forward_comm(int n, int *list, double *buf,
-                                    int /*pbc_flag*/, int * /*pbc*/)
+                                      int /*pbc_flag*/, int * /*pbc*/)
 {
-  int **nspecial = atom->nspecial;
-  tagint **special = atom->special;
-
   int m = 0;
-  for (int i = 0; i < n; i++) {
-    int j = list[i];
-    int ns = nspecial[j][0];
-    buf[m++] = ubuf(ns).d;
-    for (int k = 0; k < ns; k++) {
-        buf[m++] = ubuf(special[j][k]).d;
+
+  if (commflag == 1) {
+    int *num_bond = atom->num_bond;
+    tagint **bond_atom = atom->bond_atom;
+
+    for (int ii = 0; ii < n; ii++) {
+      int i = list[ii];
+      int nb = num_bond[i];
+      if (nb > maxbond) nb = maxbond;
+
+      buf[m++] = ubuf(nb).d;
+      for (int k = 0; k < nb; k++) {
+        buf[m++] = ubuf(bond_atom[i][k]).d; // partner tag
+        buf[m++] = bprob[i][k];             // probability draw (or 0 if not owner)
+      }
     }
   }
+
   return m;
 }
 
@@ -907,16 +956,35 @@ int FixBondRupture::pack_forward_comm(int n, int *list, double *buf,
 
 void FixBondRupture::unpack_forward_comm(int n, int first, double *buf)
 {
-  int **nspecial = atom->nspecial;
-  tagint **special = atom->special;
-
   int m = 0;
-  int last = first + n;
-  for (int i = first; i < last; i++) {
-    int ns = (int) ubuf(buf[m++]).i;
-    nspecial[i][0] = ns;
-    for (int j = 0; j < ns; j++) {
-        special[i][j] = (tagint) ubuf(buf[m++]).i;
+
+  if (commflag == 1) {
+    int *num_bond = atom->num_bond;
+    tagint **bond_atom = atom->bond_atom;
+
+    int last = first + n;
+    for (int i = first; i < last; i++) {
+      int nb = (int) ubuf(buf[m++]).i;
+      if (nb > maxbond) nb = maxbond;
+
+      // reset
+      for (int k = 0; k < maxbond; k++) bprob[i][k] = 0.0;
+
+      // for each received (partner,prob), match to our local bond list
+      for (int kk = 0; kk < nb; kk++) {
+        tagint ptag = (tagint) ubuf(buf[m++]).i;
+        double p = buf[m++];
+
+        // find matching bond slot
+        int nb_here = num_bond[i];
+        if (nb_here > maxbond) nb_here = maxbond;
+        for (int k = 0; k < nb_here; k++) {
+          if (bond_atom[i][k] == ptag) {
+            bprob[i][k] = p;
+            break;
+          }
+        }
+      }
     }
   }
 }
@@ -1048,28 +1116,29 @@ void FixBondRupture::bcast_table(Table *tb) // *UPDATED
    return a number sampled from the cdf given a random number in [0,1)
 ------------------------------------------------------------------------- */
 
-double FixBondRupture::sample_cdf(int l, double u) 
+double FixBondRupture::sample_cdf(long int key, int l) 
 {   
+
+  // Draw two random uniform numbers
+  double u1 = bond_uniform(key,l);
+  double u2 = bond_uniform(key,l + ndata);
 
   for (int attempt = 0; attempt < 1000; ++attempt) {
     double x = 0.0;
 
     if (strcmp(dist_type,"uniform") == 0 ) {
-      x = lo[l] + u * (hi[l] - lo[l]);
+      x = lo[l] + u1 * (hi[l] - lo[l]);
     } else if (strcmp(dist_type,"gauss") == 0) {
 
-      // Use two independent uniforms; clamp u1 away from 0
-      double u2 = random->uniform(); // need to draw second random number for Box-Muller
-    
-      if (u < 1.0e-12) u = 1.0e-12;
+      if (u1 < 1.0e-12) u1 = 1.0e-12;
 
-      double z0 = sqrt(-2.0 * log(u)) * cos(2.0 * M_PI * u2);
+      double z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
       x  = mu[l] + sigma[l] * z0;
   
     } else if (strcmp(dist_type,"exponential") == 0) {
-      x = -log(1-u)/lambda[l];
+      x = -log(1-u1)/lambda[l];
     } else if (strcmp(dist_type,"weibull") == 0) {
-        x = alpha[l] * pow(-log(1-u), 1.0/beta[l]);
+        x = alpha[l] * pow(-log(1-u1), 1.0/beta[l]);
     } else {
         error->all(FLERR,"Illegal distribution type in fix bond/rupture");
     }
@@ -1080,4 +1149,29 @@ double FixBondRupture::sample_cdf(int l, double u)
 
   error->all(FLERR,"Failed to sample valid bond parameter");
   return 0.0; 
+}
+
+double FixBondRupture::bond_uniform(long int key, int l)
+{
+  // 32-bit seed from key and l
+  uint32_t x = static_cast<uint32_t>(key);
+  uint32_t y = static_cast<uint32_t>(l);
+
+  x ^= static_cast<uint32_t>(seed) * 0x9E3779B9u;
+
+  // Mix key and l (simple avalanche hash)
+  x = x ^ (y * 0x9E3779B9u);
+  x = x ^ (x >> 16);
+  x = x * 0x7FEB352Du;
+  x = x ^ (x >> 15);
+  x = x * 0x846CA68Bu;
+  x = x ^ (x >> 16);
+
+  // x is now a pseudo-random 32-bit integer.
+  // Map to (0,1) excluding endpoints.
+  // (x + 1) / (2^32 + 1) is strictly between 0 and 1.
+  const double denom = 4294967297.0; // 2^32 + 1
+  double u = (static_cast<double>(x) + 1.0) / denom;
+
+  return u;
 }

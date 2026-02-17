@@ -37,10 +37,15 @@ class FixBondRupture : public Fix {
 
  protected:
   int me, nprocs, ndata, update_flag;
+  double cutoff, cutsq;
 
-  int nbreak, breakcount;
-  tagint *finalpartner;
-  int nmax_finalpartner;
+  int nbreak;
+  int commflag;
+  int nmax, maxbond;
+  double probability;
+  tagint *partner;
+  double *distsq;
+  double **bprob;
 
   // pointer to shared bond history fix (if created)
   class FixBondHistory *fix_bond_history = nullptr;
@@ -66,7 +71,7 @@ class FixBondRupture : public Fix {
 
   // Default arguments
   int btype, seed;
-  double rcrit, rcritsq, p_fraction, k0, f0, ks0, kc0, fs0, fc0;
+  double rcrit, rcritsq, rcritsq_g, p_fraction, k0, f0, ks0, kc0, fs0, fc0;
 
   // Flags for styles
   int flag_dist, flag_fraction, flag_slip, flag_slip_catch, flag_rate;
@@ -77,7 +82,8 @@ class FixBondRupture : public Fix {
   // Internal methods/functions
   void store_data();
   double store_bond(int, int, int);
-  double sample_cdf(int, double);
+  double sample_cdf(long int, int);
+  double bond_uniform(long int, int);
 
   void process_broken(int, int);
   void update_special();
