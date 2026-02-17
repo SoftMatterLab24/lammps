@@ -20,7 +20,6 @@ Syntax
          rcrit = bond longer than rcrit can break if otherwise eligible (distance units)
        *prob/fraction* args = fraction seed
          fraction = break a bond with this probability if otherwise eligible
-         seed = random number seed (positive integer)
        *prob/rate* args = kr
          kr = bond rutpure rate if otherwise eligible (inverse time units)
        *prob/slip* args = ks0 f0
@@ -33,7 +32,7 @@ Syntax
          fc0 = force-sensitivity of the bonds catch barrier (force units)
 
 * zero or more keyword/value pairs may be appended
-* keyword = *bond/table* or *bond/distribution* or *critical*
+* keyword = *bond/table* or *bond/distribution* or *critical* or *seed*
 
   .. parsed-literal::
 
@@ -55,6 +54,8 @@ Syntax
                beta = shape factor of style_arg
        *critical* value = rcrit
             rcrit = enforce bonds longer than rcrit rupture (distance units)
+       *seed* value = 
+            seed = random number seed (positive integer)
    
 Examples
 """"""""
@@ -62,8 +63,8 @@ Examples
 .. code-block:: LAMMPS
 
    fix 5 all bond/rupture 1 dist 0.3
-   fix 5 all bond/rupture 2 prob/fraction 0.3 12345 bond/table rupture.table start critical 0.3
-   fix 5 all bond/rupture 1 prob/slip 0.2 1.0 bond/distribution gauss ks0 0.2 2.0 f0 1.0 1.0 
+   fix 5 all bond/rupture 2 prob/fraction 0.3 bond/table rupture.table start critical 0.3
+   fix 5 all bond/rupture 1 prob/slip 0.2 1.0 bond/distribution gauss ks0 0.2 2.0 f0 1.0 1.0 seed 1234
 
 Description
 """""""""""
@@ -82,9 +83,7 @@ The *dist* style specifies rupture after bonds exceed a critial legnth set by va
 The *prob/fraction* style specifies bond rupture based on a fixed probability set 
 by the value *fraction*, which must be a value between 0 and 1. For rupture,
 a uniform random number between 0.0 and 1.0 is generated and the bond is only
-broken if the random number is less than *fraction*. The seed can be used to 
-specifiy the processor-unique seed used to initialized the Marsaglia random 
-number generator. By default the seed is 12345. The value setting must be a positive integer.
+broken if the random number is less than *fraction*.
 
 The *prob/rate* style specifices bond rupture based on a constant rupture rate set
 by the value *kr*, which must be a positive value. A bond will break with a discrete
@@ -157,6 +156,10 @@ be used with *bond/table* keyword.
 The *critical* keyword enforces that bonds rupture after exceeding a
 critical length set by value *rcrit*. This can for example be used 
 in conjunction with the *prob* rupture styles, to ensure bond rupture. 
+
+The *seed* keyword  can be used to specifiy the processor-unique seed 
+used to initialized the Marsaglia random number generator. By default 
+the seed is 12345. The value setting must be a positive integer.
 
 When a bond is broken, data structures within LAMMPS that store bond
 topologies are updated to reflect the breakage.  Likewise, if the bond
