@@ -74,11 +74,12 @@ specified criteria.  This can be used to model rupture of chains
 in a polymer network due to stretching of the simulation box or other
 deformations.  In this context, a bond means an interaction between a
 pair of atoms computed by the :doc:`bond_style <bond_style>` command.
-Once the bond is broken it will be permanently deleted, as will all
-angle, dihedral, and improper interactions that bond is part of. There
-are several possible styles that determine the nature of the rupture criterion.
+Once the bond is broken it will be permanently deleted. Unlike 
+:doc:`fix bond/break <fix_bond_break>` multiple bonds can broken in a 
+single timestep. There are several possible styles that determine the 
+nature of the rupture criterion.
 
-The *dist* style specifies rupture after bonds exceed a critial legnth set by value *rcrit*.
+The *dist* style specifies rupture after bonds exceed a critial length set by value *rcrit*.
 
 The *prob/fraction* style specifies bond rupture based on a fixed probability set 
 by the value *fraction*, which must be a value between 0 and 1. For rupture,
