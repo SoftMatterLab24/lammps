@@ -271,7 +271,6 @@ int FixBondRupture::setmask()
 {
   int mask = 0;
   mask |= POST_INTEGRATE;
-  mask |= PRE_FORCE;
   return mask;
 }
 
@@ -491,7 +490,7 @@ void FixBondRupture::store_data()
 
 /* ---------------------------------------------------------------------- */
 
- void FixBondRupture::pre_force(int vflag)
+void FixBondRupture::post_integrate()
  {
 
   // On first call, initialize stored per/bond data
@@ -515,6 +514,8 @@ void FixBondRupture::store_data()
   double **bondstore = fix_bond_history->bondstore;
   double r0;
   double dt = (update->dt);
+  
+  int breakcount = 0;  // Track number of broken bonds
 
   // If using probabilistic rupture draw uniform random number
   if (flag_prob) {
@@ -667,11 +668,18 @@ void FixBondRupture::store_data()
     // Check the probability constraint
     if (p_rupture <= probability) continue; // bond does not rupture
     
-    bondlist[n][2] = 0;
+    bondlist[n][2] = 0;  // Mark bond as dead in neighbor list
     process_broken(i1, i2);
+    breakcount++;
   }
   
-  next_reneighbor = update->ntimestep;
+  // Update global bond counter for bonds broken on this processor
+  atom->nbonds -= breakcount;
+  
+  // Force reneighboring if any bonds broke
+  if (breakcount > 0) {
+    next_reneighbor = update->ntimestep;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -680,19 +688,6 @@ void FixBondRupture::process_broken(int i, int j)
 {
 
   int nlocal = atom->nlocal;
-  if (fix_update_special_bonds) {
-    // If this processor owns two copies of the bond (i.e. if the domain is periodic and 1 proc thick),
-    //   skip instance where larger tag (j) owned
-    int check = 1;
-    if (i >= nlocal) {
-      int imap = atom->map(atom->tag[i]);
-      if (imap < nlocal) check = 0;
-    }
-    if (check) {
-      //printf("Proc %d: Adding broken bond (%d,%d) to fix_update_special_bonds\n", comm->me, atom->tag[i], atom->tag[j]);
-      fix_update_special_bonds->add_broken_bond(i, j);
-    }
-  }
 
   // Manually search and remove from atom arrays
   // need to remove in case special bonds arrays rebuilt
@@ -732,6 +727,40 @@ void FixBondRupture::process_broken(int i, int j)
           fix_bond_history2->delete_history(j, n - 1);
         }
         num_bond[j]--;
+        break;
+      }
+    }
+  }
+  
+  // Update special lists immediately
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+  
+  // Remove from i's special list
+  if (i < nlocal) {
+    tagint *slist = special[i];
+    int n1 = nspecial[i][0];
+    for (m = 0; m < n1; m++) {
+      if (slist[m] == tag[j]) {
+        // Found it - shift remaining entries
+        for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
+        nspecial[i][0]--;
+        nspecial[i][1] = nspecial[i][2] = nspecial[i][0];
+        break;
+      }
+    }
+  }
+  
+  // Remove from j's special list
+  if (j < nlocal) {
+    tagint *slist = special[j];
+    int n1 = nspecial[j][0];
+    for (m = 0; m < n1; m++) {
+      if (slist[m] == tag[i]) {
+        // Found it - shift remaining entries
+        for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
+        nspecial[j][0]--;
+        nspecial[j][1] = nspecial[j][2] = nspecial[j][0];
         break;
       }
     }
