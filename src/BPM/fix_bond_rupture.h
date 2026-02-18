@@ -27,7 +27,6 @@ class FixBondRupture : public Fix {
  public:
   FixBondRupture(class LAMMPS *, int, char **);
   ~FixBondRupture() override;
-  //   void post_constructor() override;
   int setmask() override;
   void init() override;
   void post_integrate() override;
@@ -35,7 +34,7 @@ class FixBondRupture : public Fix {
   void unpack_forward_comm(int, int, double *) override;
   int pack_reverse_comm(int, int, double *) override;
   void unpack_reverse_comm(int, int *, double *) override;
-  int pack_reverse_comm_size(int n, int nswap) override;
+  int pack_reverse_comm_size(int, int) override;
 
  protected:
   int me, nprocs, ndata, update_flag;
@@ -50,9 +49,7 @@ class FixBondRupture : public Fix {
 
   // pointer to shared bond history fix (if created)
   class FixBondHistory *fix_bond_history = nullptr;
-  class FixUpdateSpecialBonds *fix_update_special_bonds = nullptr;
   char *id_fix_bond_history_rupture = nullptr;
-  char *id_fix_update_special_bonds_rupture = nullptr;
 
   int n_histories;
   std::vector<Fix *> histories;
@@ -89,11 +86,12 @@ class FixBondRupture : public Fix {
   void process_broken(int, int);
   void update_topology();
 
-  // Create an array to store bonds broken this timestep (new)
+  // Create an array to store bonds broken this timestep
   // and since the last neighbor list build
   std::vector<std::pair<tagint, tagint>> new_broken_pairs;
   std::vector<std::pair<tagint, tagint>> new_created_pairs;
   
+  // Structs and methods for reading/processing table files
   // Define struct for bond table
   struct Table {
    int ninput;
