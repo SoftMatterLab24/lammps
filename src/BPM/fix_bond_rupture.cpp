@@ -15,6 +15,7 @@
 #include "fix_bond_rupture.h"
 
 #include "fix_bond_history.h"
+#include "fix_update_special_bonds.h"
 
 #include "atom.h"
 #include "atom_vec.h"
@@ -51,8 +52,8 @@ using namespace FixConst;
 FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
   bprob(nullptr), random(nullptr), 
-  id_fix_bond_history_rupture(nullptr),
-  fix_bond_history(nullptr)
+  id_fix_bond_history_rupture(nullptr), id_fix_update_special_bonds_rupture(nullptr),
+  fix_bond_history(nullptr), fix_update_special_bonds(nullptr)
 {
   if (narg < 5) error->all(FLERR,"Illegal fix bond/rupture command");
 
@@ -236,6 +237,8 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   update_flag = 1;
   id_fix_bond_history_rupture = utils::strdup(fmt::format("HISTORY_BOND_RUPTURE_{}", instance_total));
 
+  id_fix_update_special_bonds_rupture = utils::strdup(fmt::format("UPDATE_SPECIAL_BONDS_RUPTURE_{}", instance_total));
+
   // allocate
   nmax = 0;
 }
@@ -247,8 +250,12 @@ FixBondRupture::~FixBondRupture()
   delete random;
 
   memory->destroy(bprob);
+  memory->destroy(break_partner);
   
   if (fix_bond_history) modify->delete_fix(id_fix_bond_history_rupture);
+  if (id_fix_update_special_bonds_rupture) modify->delete_fix(id_fix_update_special_bonds_rupture);
+
+  delete[] id_fix_update_special_bonds_rupture;
   delete[] id_fix_bond_history_rupture;
   if (dist_type) delete[] dist_type;
   if (setflag) memory->destroy(setflag);
@@ -288,10 +295,30 @@ void FixBondRupture::init()
     fix_bond_history = dynamic_cast<FixBondHistory *>(f1);
   }
 
-  if (force->newton_bond == 0) {
-    // bond/rupture requires Newton bond off (to match special list management)
+  if (force->special_lj[1] == 1.0 && force->special_lj[2] == 1.0 && 
+      force->special_lj[3] == 1.0 &&  force->special_coul[1] == 1.0 &&
+      force->special_coul[2] == 1.0 && force->special_coul[3] == 1.0) {
+
+    if (id_fix_update_special_bonds_rupture) {
+      modify->delete_fix(id_fix_update_special_bonds_rupture);
+      delete[] id_fix_update_special_bonds_rupture;
+      id_fix_update_special_bonds_rupture = nullptr;
+    }
+
   } else {
-    error->all(FLERR, "fix bond/rupture requires Newton bond off");
+    if (force->newton_bond) error->all(FLERR, "fix bond/rupture requires Newton bond off");
+
+    if (!fix_update_special_bonds) {
+      // check if an update fix already exists, if so use it
+          auto fixes = modify->get_fix_by_style("UPDATE_SPECIAL_BONDS");
+          if (fixes.size() > 0 ) {
+            fix_update_special_bonds = dynamic_cast<FixUpdateSpecialBonds *>(fixes[0]);
+          } else {
+            // if not, create a new one
+            Fix *f2 = modify->add_fix(fmt::format("{} all UPDATE_SPECIAL_BONDS", id_fix_update_special_bonds_rupture), 1);
+            fix_update_special_bonds = dynamic_cast<FixUpdateSpecialBonds *>(f2);
+          }
+    }
   }
 
   // All histories
@@ -465,33 +492,56 @@ void FixBondRupture::store_data()
 /* ---------------------------------------------------------------------- */
 
 void FixBondRupture::post_integrate()
- {
-
+{
   // On first call, initialize stored per/bond data
   if (!fix_bond_history->stored_flag) {
     fix_bond_history->stored_flag = true;
     store_data();
   }
+
+  int nlocal = atom->nlocal;
+  int nghost = atom->nghost;
+  int nall = nlocal + nghost;
+  
+  int *num_bond = atom->num_bond;
+  int **bond_type = atom->bond_type;
+  
+  tagint **bond_atom = atom->bond_atom;
+  tagint *tag = atom->tag;
+
+  int **bondlist = neighbor->bondlist;
+  int nbondlist = neighbor->nbondlist;
+
+  Bond *bond = force->bond;
   
   int i1, i2, itmp, type, i, j, m, n;
   double **x = atom->x;
-  int nlocal = atom->nlocal;
-  int nall = atom->nlocal + atom->nghost;
-  int *num_bond = atom->num_bond;
-  tagint *tag = atom->tag;
-  tagint **bond_atom = atom->bond_atom;
-
-  Bond *bond = force->bond;
-  int **bond_type = atom->bond_type;
-  int **bondlist = neighbor->bondlist;
-  int nbondlist = neighbor->nbondlist;
   double **bondstore = fix_bond_history->bondstore;
   double r0;
   double dt = (update->dt);
+
+  // acquire updated ghost atom positions
+  // necessary b/c are calling this after integrate, but before Verlet comm
+  comm->forward_comm();
+
   
   int breakcount = 0;  // Track number of broken bonds
+  // Allocate/reallocate arrays if needed
+  if (atom->nmax > nmax) {
+    memory->destroy(break_partner);
+    //memory->destroy(break_flag);
+    nmax = atom->nmax;
+    memory->create(break_partner, nmax, "fix_bond_rupture:break_partner");
+    //memory->create(break_flag, nmax, "fix_bond_rupture:break_flag");
+  }
 
-  // If using probabilistic rupture draw uniform random number
+  // Initialize break flags for all atoms
+  for (i = 0; i < nall; i++) {
+    //break_flag[i] = 0;
+    break_partner[i] = 0;
+  }
+
+  // loop over bondlist to  set probability of rupture for each bond if using probabilistic rupture
   if (flag_prob) {
     maxbond = atom->bond_per_atom;
     if (atom->nmax > nmax) {
@@ -534,7 +584,7 @@ void FixBondRupture::post_integrate()
     commflag = 0;
   }
   
-
+  // PASS 1: Identify bonds to break (only on local atoms)
   for (n = 0; n < nbondlist; n++) {
     if (bondlist[n][2] <= 0) continue;
 
@@ -550,7 +600,7 @@ void FixBondRupture::post_integrate()
       i2 = itmp;
     }
 
-    if (i1 >= atom->nlocal) continue; 
+    if (i1 >= atom->nlocal) continue;  // Only process if i1 is local
 
     // Get bond probability if using
     probability = 0.0;
@@ -642,24 +692,80 @@ void FixBondRupture::post_integrate()
     // Check the probability constraint
     if (p_rupture <= probability) continue; // bond does not rupture
     
+    // Mark bond for potential breaking - mark BOTH atoms symmetrically
     bondlist[n][2] = 0;  // Mark bond as dead in neighbor list
-    process_broken(i1, i2);
-    breakcount++;
+    break_partner[i1] = tag[i2];
+    break_partner[i2] = tag[i1];
+
+    //break_flag[i2] = 1;  // Also mark i2 symmetrically
+
   }
   
+  // Synchronize break flags across processors via reverse communication
+  // This ensures both atoms agree on breaking when one is ghost on the other processor
+  // Pack 1 values per atom (break_flag and break_partner)
+  if (force->newton_bond) comm->reverse_comm(this);
+
+  // foward comm of break_partner so ghosts have it for next step
+  commflag = 2;
+  comm->forward_comm(this);
+  commflag = 0;
+  
+  // PASS 2: Delete bonds where both atoms agree to break
+  //nbreak = 0;
+  for (i = 0; i < nlocal; i++) {
+    if (break_partner[i] == 0) continue;  // No partner, so skip
+    j = atom->map(break_partner[i]);
+    if (break_partner[j] != tag[i]) continue;  // Both atoms agree to break, so delete the bond
+    
+    process_broken(i, j);
+    //if (tag[i] < tag[j]) nbreak++;
+  }
+
+  /* 
+  for (n = 0; n < nbondlist; n++) {
+    //if (bondlist[n][2] <= 0) continue;  // Already marked dead
+    
+    i1 = bondlist[n][0];
+    i2 = bondlist[n][1];
+    type = bondlist[n][2];
+    
+    if (type != btype) continue;
+    
+    // Ensure i1 < i2 by tag
+    if (tag[i2] < tag[i1]) {
+      itmp = i1;
+      i1 = i2;
+      i2 = itmp;
+    }
+    
+    // Both atoms must be marked for breaking with each other
+    if (break_flag[i1] && break_flag[i2] && 
+        break_partner[i1] == tag[i2] && break_partner[i2] == tag[i1]) {
+      bondlist[n][2] = 0;  // Mark dead
+      process_broken(i1, i2);
+      breakcount++;
+    }
+  }
+  */
+  update_topology();
+
   // Update global bond counter for bonds broken on this processor
-  atom->nbonds -= breakcount;
+  //atom->nbonds -= breakcount;
   
   // Force reneighboring if any bonds broke
-  if (breakcount > 0) {
-    next_reneighbor = update->ntimestep;
-  }
+  next_reneighbor = update->ntimestep;
 }
 
 /* ---------------------------------------------------------------------- */
 
+/* 
 void FixBondRupture::process_broken(int i, int j)
 {
+
+    // Then add the pair to new_broken_pairs
+  auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
+  new_broken_pairs.push_back(tag_pair);
 
   int nlocal = atom->nlocal;
 
@@ -740,6 +846,223 @@ void FixBondRupture::process_broken(int i, int j)
     }
   }
 }
+*/
+void FixBondRupture::process_broken(int i, int j) // from dynamic
+{
+  
+  // Then add the pair to new_broken_pairs
+  auto tag_pair = std::make_pair(atom->tag[i], atom->tag[j]);
+  new_broken_pairs.push_back(tag_pair);
+
+  int m, n, l, nmax;
+
+  // Manually search and remove from atom arrays
+  // need to remove in case special bonds arrays rebuilt
+  int nlocal = atom->nlocal;
+
+  tagint *tag = atom->tag;
+  tagint **bond_atom = atom->bond_atom;
+  int **bond_type = atom->bond_type;
+  int *num_bond = atom->num_bond;
+
+  int **bondlist = neighbor->bondlist;
+  int nbondlist = neighbor->nbondlist;
+  
+  if (i < nlocal) {
+    
+    for (m = (num_bond[i] - 1); m >= 0; m--) {
+      if (bond_atom[i][m] == tag[j]) {
+
+        nmax = num_bond[i] - 1;
+        if (m == nmax) {
+          if (n_histories > 0)
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->delete_history(i, m);
+            }
+        } else {
+          bond_type[i][m] = bond_type[i][nmax];
+          bond_atom[i][m] = bond_atom[i][nmax];
+          if (n_histories > 0) {
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->shift_history(i, m, nmax);
+              fix_bond_history->delete_history(i, nmax);
+            }
+          }
+        }
+        bond_type[i][nmax] = 0;
+        num_bond[i]--;
+        break;
+      }
+    }
+  }
+
+  if (j < nlocal) {
+    
+    for (n = (num_bond[j] - 1); n >= 0; n--) {
+      if (bond_atom[j][n] == tag[i]) {
+
+        nmax = num_bond[j] - 1;
+        if (n == nmax) {
+          if (n_histories > 0)
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->delete_history(j, n);
+            }
+        } else {
+          bond_type[j][n] = bond_type[j][nmax];
+          bond_atom[j][n] = bond_atom[j][nmax];
+          if (n_histories > 0) {
+            for (auto &ihistory : histories) {
+              auto fix_bond_history = dynamic_cast<FixBondHistory *>(ihistory);
+              fix_bond_history->shift_history(j, n, nmax);
+              fix_bond_history->delete_history(j, nmax);
+            }
+          }
+        }
+        bond_type[j][nmax] = 0;
+        num_bond[j]--;
+        break;
+      }
+    }
+  }
+
+  // Update special neighbor list
+  tagint *slist;
+  int **nspecial = atom->nspecial;
+  tagint **special = atom->special;
+
+  // remove i from special bond list for atom j and vice versa
+  // ignore n2, n3 since 1-3, 1-4 special factors required to be 1.0
+  if (i < nlocal) {
+    slist = special[i];
+    int n1 = nspecial[i][0];
+    int m;
+    for (m = 0; m < n1; m++)
+      if (slist[m] == tag[j]) break;
+    for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
+    nspecial[i][0]--;
+    nspecial[i][1] = nspecial[i][2] = nspecial[i][0];
+  }
+
+  if (j < nlocal) {
+    slist = special[j];
+    int n1 = nspecial[j][0];
+    int m;
+    for (int m = 0; m < n1; m++)
+      if (slist[m] == tag[i]) break;
+    for (; m < n1 - 1; m++) slist[m] = slist[m + 1];
+    nspecial[j][0]--;
+    nspecial[j][1] = nspecial[j][2] = nspecial[j][0];
+  }
+}
+
+/* ----------------------------------------------------------------------
+  Update special lists for recently broken/created bonds
+  Assumes appropriate atom/bond arrays were updated, e.g. had called
+      neighbor->add_temporary_bond(i1, i2, btype);
+------------------------------------------------------------------------- */
+
+void FixBondRupture::update_topology()
+{
+
+  int nlocal = atom->nlocal;
+  tagint *tag = atom->tag;
+
+  // In theory could communicate a list of broken bonds to neighboring processors here
+  // to remove restriction that users use Newton bond off
+
+  for (int ilist = 0; ilist < neighbor->nlist; ilist++) {
+    NeighList *list = neighbor->lists[ilist];
+
+    // Skip copied lists, will update original
+    if (list->copy) continue;
+
+    int *numneigh = list->numneigh;
+    int **firstneigh = list->firstneigh;
+
+    for (auto const &it : new_broken_pairs) {
+      tagint tag1 = it.first;
+      tagint tag2 = it.second;
+      int i1 = atom->map(tag1);
+      int i2 = atom->map(tag2);
+
+      if (i1 < 0 || i2 < 0) {
+        error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
+                    "from further away 4");
+      }
+
+      // Loop through atoms of owned atoms i j
+      if (i1 < nlocal) {
+        int *jlist = firstneigh[i1];
+        int jnum = numneigh[i1];
+        for (int jj = 0; jj < jnum; jj++) {
+          int j = jlist[jj];
+          j &= SPECIALMASK;    // Clear special bond bits
+          if (tag[j] == tag2) jlist[jj] = j;
+        }
+      }
+
+      if (i2 < nlocal) {
+        int *jlist = firstneigh[i2];
+        int jnum = numneigh[i2];
+        for (int jj = 0; jj < jnum; jj++) {
+          int j = jlist[jj];
+          j &= SPECIALMASK;    // Clear special bond bits
+          if (tag[j] == tag1) jlist[jj] = j;
+        }
+      }
+    }
+  }
+
+  for (int ilist = 0; ilist < neighbor->nlist; ilist++) {
+    NeighList *list = neighbor->lists[ilist];
+
+    // Skip copied lists, will update original
+    if (list->copy) continue;
+
+    int *numneigh = list->numneigh;
+    int **firstneigh = list->firstneigh;
+
+    for (auto const &it : new_created_pairs) {
+      tagint tag1 = it.first;
+      tagint tag2 = it.second;
+      int i1 = atom->map(tag1);
+      int i2 = atom->map(tag2);
+
+      if (i1 < 0 || i2 < 0) {
+        error->one(FLERR,"Fix bond/dynamic needs ghost atoms "
+                    "from further away 5");
+      }
+
+      // Loop through atoms of owned atoms i j
+      if (i1 < nlocal) {
+        int *jlist = firstneigh[i1];
+        int jnum = numneigh[i1];
+        for (int jj = 0; jj < jnum; jj++) {
+          int j = jlist[jj];
+          if (((j >> SBBITS) & 3) != 0) continue;               // Skip bonded pairs
+          if (tag[j] == tag2) jlist[jj] = j ^ (1 << SBBITS);    // Add 1-2 special bond bits
+        }
+      }
+
+      if (i2 < nlocal) {
+        int *jlist = firstneigh[i2];
+        int jnum = numneigh[i2];
+        for (int jj = 0; jj < jnum; jj++) {
+          int j = jlist[jj];
+          if (((j >> SBBITS) & 3) != 0) continue;               // Skip bonded pairs
+          if (tag[j] == tag1) jlist[jj] = j ^ (1 << SBBITS);    // Add 1-2 special bond bits
+        }
+      }
+    }
+  }
+
+  new_broken_pairs.clear();
+  new_created_pairs.clear();
+
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -765,7 +1088,49 @@ int FixBondRupture::pack_forward_comm(int n, int *list, double *buf,
     }
   }
 
+  if (commflag == 2) {
+    // forward comm of break_partner for ghosts
+    for (int ii = 0; ii < n; ii++) {
+      int i = list[ii];
+      buf[m++] = ubuf(break_partner[i]).d;
+    }
+  }
+
   return m;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixBondRupture::pack_reverse_comm_size(int n, int nswap)
+{
+  // Each atom sends 1 value: break_partner
+  return n;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int FixBondRupture::pack_reverse_comm(int n, int ndata, double *buf)
+{
+  // Pack break_partner for reverse communication
+  // This synchronizes which bonds should be broken across processors
+  int m = 0;
+  int last = ndata + n;
+  for (int i = ndata; i < last; i++) {
+    buf[m++] = ubuf(break_partner[i]).d;
+  }
+  return m;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixBondRupture::unpack_reverse_comm(int n, int *list, double *buf)
+{
+  // Unpack break_partner from reverse communication
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    int j = list[i];
+    break_partner[j] = (tagint) ubuf(buf[m++]).i;
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -801,6 +1166,14 @@ void FixBondRupture::unpack_forward_comm(int n, int first, double *buf)
           }
         }
       }
+    }
+  }
+
+  if (commflag == 2) {
+    // forward comm of break_partner for ghosts
+    int last = first + n;
+    for (int i = first; i < last; i++) {
+      break_partner[i] = (tagint) ubuf(buf[m++]).i;
     }
   }
 }

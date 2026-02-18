@@ -33,6 +33,9 @@ class FixBondRupture : public Fix {
   void post_integrate() override;
   int pack_forward_comm(int, int *, double *, int, int *) override;
   void unpack_forward_comm(int, int, double *) override;
+  int pack_reverse_comm(int, int, double *) override;
+  void unpack_reverse_comm(int, int *, double *) override;
+  int pack_reverse_comm_size(int n, int nswap) override;
 
  protected:
   int me, nprocs, ndata, update_flag;
@@ -42,9 +45,14 @@ class FixBondRupture : public Fix {
   double probability;
   double **bprob;
 
+  // Partner tracking for cross-processor bonds
+  tagint *break_partner = nullptr;
+
   // pointer to shared bond history fix (if created)
   class FixBondHistory *fix_bond_history = nullptr;
+  class FixUpdateSpecialBonds *fix_update_special_bonds = nullptr;
   char *id_fix_bond_history_rupture = nullptr;
+  char *id_fix_update_special_bonds_rupture = nullptr;
 
   int n_histories;
   std::vector<Fix *> histories;
@@ -79,6 +87,12 @@ class FixBondRupture : public Fix {
   double bond_uniform(long int, int);
 
   void process_broken(int, int);
+  void update_topology();
+
+  // Create an array to store bonds broken this timestep (new)
+  // and since the last neighbor list build
+  std::vector<std::pair<tagint, tagint>> new_broken_pairs;
+  std::vector<std::pair<tagint, tagint>> new_created_pairs;
   
   // Define struct for bond table
   struct Table {
