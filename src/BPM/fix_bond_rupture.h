@@ -44,9 +44,7 @@ class FixBondRupture : public Fix {
 
   // pointer to shared bond history fix (if created)
   class FixBondHistory *fix_bond_history = nullptr;
-  class FixUpdateSpecialBonds *fix_update_special_bonds = nullptr;
   char *id_fix_bond_history_rupture = nullptr;
-  char *id_fix_update_special_bonds_rupture = nullptr;
 
   int n_histories;
   std::vector<Fix *> histories;

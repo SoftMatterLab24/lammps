@@ -15,7 +15,6 @@
 #include "fix_bond_rupture.h"
 
 #include "fix_bond_history.h"
-#include "fix_update_special_bonds.h"
 
 #include "atom.h"
 #include "atom_vec.h"
@@ -52,8 +51,8 @@ using namespace FixConst;
 FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
   bprob(nullptr), random(nullptr), 
-  id_fix_bond_history_rupture(nullptr), id_fix_update_special_bonds_rupture(nullptr),
-  fix_bond_history(nullptr), fix_update_special_bonds(nullptr)
+  id_fix_bond_history_rupture(nullptr),
+  fix_bond_history(nullptr)
 {
   if (narg < 5) error->all(FLERR,"Illegal fix bond/rupture command");
 
@@ -237,8 +236,6 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   update_flag = 1;
   id_fix_bond_history_rupture = utils::strdup(fmt::format("HISTORY_BOND_RUPTURE_{}", instance_total));
 
-  id_fix_update_special_bonds_rupture = utils::strdup(fmt::format("UPDATE_SPECIAL_BONDS_RUPTURE_{}", instance_total));
-
   // allocate
   nmax = 0;
 }
@@ -252,9 +249,6 @@ FixBondRupture::~FixBondRupture()
   memory->destroy(bprob);
   
   if (fix_bond_history) modify->delete_fix(id_fix_bond_history_rupture);
-  if (id_fix_update_special_bonds_rupture) modify->delete_fix(id_fix_update_special_bonds_rupture);
-
-  delete[] id_fix_update_special_bonds_rupture;
   delete[] id_fix_bond_history_rupture;
   if (dist_type) delete[] dist_type;
   if (setflag) memory->destroy(setflag);
@@ -294,30 +288,10 @@ void FixBondRupture::init()
     fix_bond_history = dynamic_cast<FixBondHistory *>(f1);
   }
 
-  if (force->special_lj[1] == 1.0 && force->special_lj[2] == 1.0 && 
-      force->special_lj[3] == 1.0 &&  force->special_coul[1] == 1.0 &&
-      force->special_coul[2] == 1.0 && force->special_coul[3] == 1.0) {
-
-    if (id_fix_update_special_bonds_rupture) {
-      modify->delete_fix(id_fix_update_special_bonds_rupture);
-      delete[] id_fix_update_special_bonds_rupture;
-      id_fix_update_special_bonds_rupture = nullptr;
-    }
-
+  if (force->newton_bond == 0) {
+    // bond/rupture requires Newton bond off (to match special list management)
   } else {
-    if (force->newton_bond) error->all(FLERR, "fix bond/rupture requires Newton bond off");
-
-    if (!fix_update_special_bonds) {
-      // check if an update fix already exists, if so use it
-          auto fixes = modify->get_fix_by_style("UPDATE_SPECIAL_BONDS");
-          if (fixes.size() > 0 ) {
-            fix_update_special_bonds = dynamic_cast<FixUpdateSpecialBonds *>(fixes[0]);
-          } else {
-            // if not, create a new one
-            Fix *f2 = modify->add_fix(fmt::format("{} all UPDATE_SPECIAL_BONDS", id_fix_update_special_bonds_rupture), 1);
-            fix_update_special_bonds = dynamic_cast<FixUpdateSpecialBonds *>(f2);
-          }
-    }
+    error->all(FLERR, "fix bond/rupture requires Newton bond off");
   }
 
   // All histories
