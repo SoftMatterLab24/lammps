@@ -52,8 +52,8 @@ BondBPMuFJC::BondBPMuFJC(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_UFJC");
 
-  single_extra = 2;
-  svector = new double[2];
+  single_extra = 3;
+  svector = new double[3];
 
   nmax = 0;
 

@@ -103,7 +103,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         iarg += 1;
     } else if (strcmp(style_name,"prob/tilt") == 0) {
         if (iarg+3 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
-        flag_tilt = 1; param_names = {"zeta","kappa","omega"};
+        flag_tilt = 1; flag_prob = 1; param_names = {"zeta","kappa","omega"};
         zeta = utils::numeric(FLERR,arg[iarg],false,lmp);
         kappa = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         omega = utils::numeric(FLERR,arg[iarg+2],false,lmp);
@@ -552,7 +552,7 @@ void FixBondRupture::post_integrate()
 
     // Resize bond probability list and initialize it
     // Must be size [nmax][maxbond]
-    if (atom->nmax > nmax) {
+    if (atom->nmax >= nmax) {
       memory->destroy(bprob);
       nmax = atom->nmax;
       memory->create(bprob, nmax, maxbond, "fix_bond_rupture:bprob");
@@ -692,10 +692,17 @@ void FixBondRupture::post_integrate()
       double bondforce = fabs(fbond)*r;
 
       if (force->bond->single_extra < 3) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture prob/tilt");
+      
       N    = bond->svector[0];
       b    = bond->svector[1]; 
       lamv = bond->svector[2];
 
+      dU = barrier(bondforce, lamv, kappa, zeta);
+
+      double p_rup = exp(-dU*zeta); // probability of rupture based on barrier height
+      kr = N*omega*p_rup;           // rate of rupture based on barrier and attempt frequency
+
+      p_rupture = 1.0 - exp(-kr*dt);
     }
     if (flag_slip){
       // Find force in bond
@@ -727,7 +734,7 @@ void FixBondRupture::post_integrate()
         p_rupture = 1.0;
       }
     }
-    
+   
     // Check the probability constraint
     if (p_rupture <= probability) continue; // bond does not rupture
     
@@ -1290,5 +1297,37 @@ double FixBondRupture::bond_uniform(long int key, int l)
 
 double FixBondRupture::barrier(double fbond, double lamv, double kappa, double zeta)
 {
- return 0.0;
+  double lamv_crit, lamv_localmin, lamv_localmax;
+  double term1;
+  double f, umin, umax;
+
+  // Compute critical stretch
+  lamv_crit = 1 + pow(zeta / kappa , 0.5);
+
+  if (lamv >= lamv_crit) return 0;
+
+  f = fabs(fbond);
+  
+  lamv_localmin = 1 + f / kappa;
+  term1 = (pow(zeta,2.0) * (1 / f) / kappa ) ;
+  lamv_localmax = 1 + pow(term1, 1.0/3.0);
+
+  
+  // PE of local minima
+  if (lamv_localmin < lamv_crit) {
+    umin = (0.5 * kappa / zeta * pow((lamv_localmin - 1), 2.0)) - (f * lamv_localmin / zeta);
+  } else {
+    umin = (1 - zeta / (2 * kappa * pow((lamv_localmin - 1), 2.0))) - (f * lamv_localmin / zeta);
+  }
+
+  // PE of local maxima
+  if (lamv_localmax < lamv_crit) {
+    umax = (0.5 * kappa / zeta * pow((lamv_localmax - 1), 2.0)) - (f * lamv_localmax / zeta);
+  } else {
+    umax = (1 - zeta / (2 * kappa * pow((lamv_localmax - 1), 2.0))) - (f * lamv_localmax / zeta);
+  }
+
+  // if local max is above 1e20
+  //printf("lamv %f, lamv_crit %f, lamv_localmin %f, lamv_localmax %f bondforce %f, umin %f, umax %f \n", lamv, lamv_crit, lamv_localmin, lamv_localmax, fbond, umin, umax);
+  return umax - umin;
 }
