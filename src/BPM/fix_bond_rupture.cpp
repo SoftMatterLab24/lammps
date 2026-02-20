@@ -69,7 +69,8 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   seed = 12345;
 
   // style_flags:
-  flag_dist = 0; flag_fraction = 0; flag_slip = 0; flag_slip_catch = 0; flag_rate = 0;
+  flag_dist = 0; flag_stretch = 0; // distance based
+  flag_fraction = 0; flag_slip = 0; flag_slip_catch = 0; flag_rate = 0; flag_tilt; // prob based
   
   // keyword flags:
   flag_table = 0; flag_distribution = 0; flag_crit = 0, flag_prob = 0;
@@ -92,6 +93,23 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         rcritsq = rcrit*rcrit;
         ndata = 1;
         iarg += 1;
+    } else if (strcmp(style_name,"stretch") == 0) {
+        if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
+        flag_stretch = 1; param_names = {"lamc"};
+        lamc = utils::numeric(FLERR,arg[iarg],false,lmp);
+        printf("stretch crit %f \n",lamc);
+        if (lamc < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
+        ndata = 1;
+        iarg += 1;
+    } else if (strcmp(style_name,"prob/tilt") == 0) {
+        if (iarg+3 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
+        flag_tilt = 1; param_names = {"zeta","kappa","omega"};
+        zeta = utils::numeric(FLERR,arg[iarg],false,lmp);
+        kappa = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        omega = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+        if (zeta < 0.0 || kappa < 0.0 || omega < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
+        ndata = 3;
+        iarg += 3;
     } else if (strcmp(style_name,"prob/fraction") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
         flag_fraction = 1; flag_prob = 1; param_names = {"fraction"};
@@ -436,12 +454,34 @@ void FixBondRupture::store_data()
               // if not using distribution for this parameter, use the default value specified in args
               if (flag_dist){
                 value = rcrit;
+              } else if (flag_stretch) {
+                value = lamc;
               } else if (flag_fraction){
                 value = p_fraction;
+              } else if (flag_tilt){
+                if (l == 1) {
+                  value = zeta;
+                } else if (l == 2) {
+                  value = kappa;
+                } else if (l == 3) {
+                  value = omega;
+                }
               } else if (flag_slip){
-                value = k0;
+                if (l == 1) {
+                  value = k0;
+                } else if (l == 2) {
+                  value = f0;
+                }
               } else if (flag_slip_catch){
-                value = ks0;
+                if (l == 1) {
+                  value = ks0;
+                } else if (l == 2) {
+                  value = kc0;
+                } else if (l == 3) {
+                  value = fs0;
+                } else if (l == 4) {
+                  value = fc0;
+                }
               } else if (flag_rate){
                 value = k0;
               }
@@ -487,6 +527,7 @@ void FixBondRupture::post_integrate()
   double **bondstore = fix_bond_history->bondstore;
 
   double dt = (update->dt);
+  double N, b, Nb, lam, lamv, dU, kr;
 
   // acquire updated ghost atom positions
   // necessary b/c are calling this after integrate, but before Verlet comm
@@ -588,8 +629,14 @@ void FixBondRupture::post_integrate()
         // get style modifiers from bondstore
         if (flag_dist) {
             rcritsq = bondstore[n][0]*bondstore[n][0];
+        } else if (flag_stretch){
+            lamc = bondstore[n][0];
         } else if (flag_fraction){
             p_fraction = bondstore[n][0]; 
+        } else if (flag_tilt){
+            zeta = bondstore[n][0];
+            kappa = bondstore[n][1];
+            omega = bondstore[n][2];
         } else if (flag_slip){
             k0 = bondstore[n][0];
             f0 = bondstore[n][1];
@@ -619,8 +666,36 @@ void FixBondRupture::post_integrate()
         p_rupture = 1.0;
       }
     }
+    if (flag_stretch) {
+      double fbond; // fbond is returned as f/r
+      double engpot = bond->single(btype,rsq,i1,i2,fbond);
+      double r = sqrt(rsq);
+
+      if (force->bond->single_extra < 2) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture stretch");
+      N    = bond->svector[0];
+      b    = bond->svector[1]; 
+      lam = r / (N *b);
+      if (lam >= lamc) {
+        printf("Bond broke with stretch %f and crit stretch %f \n",lam,lamc);
+        p_rupture = 1.0;
+      }
+    }
     if (flag_fraction){
       p_rupture = p_fraction;
+    }
+    if (flag_tilt) {
+
+      // Find force in bond
+      double fbond; // fbond is returned as f/r
+      double engpot = bond->single(btype,rsq,i1,i2,fbond);
+      double r = sqrt(rsq);
+      double bondforce = fabs(fbond)*r;
+
+      if (force->bond->single_extra < 3) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture prob/tilt");
+      N    = bond->svector[0];
+      b    = bond->svector[1]; 
+      lamv = bond->svector[2];
+
     }
     if (flag_slip){
       // Find force in bond
@@ -1207,4 +1282,13 @@ double FixBondRupture::bond_uniform(long int key, int l)
   double u = (static_cast<double>(x) + 1.0) / denom;
 
   return u;
+}
+
+/* ----------------------------------------------------------------------
+    Compute barrier height of tilted composite potential energy landscape
+  ------------------------------------------------------------------------- */
+
+double FixBondRupture::barrier(double fbond, double lamv, double kappa, double zeta)
+{
+ return 0.0;
 }

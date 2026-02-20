@@ -69,19 +69,20 @@ class FixBondRupture : public Fix {
 
   // Default arguments
   int btype, seed;
-  double rcrit, rcritsq, rcritsq_g, p_fraction, k0, f0, ks0, kc0, fs0, fc0;
+  double rcrit, rcritsq, rcritsq_g, lamc, p_fraction, zeta, kappa, omega, k0, f0, ks0, kc0, fs0, fc0;
 
   // Flags for styles
-  int flag_dist, flag_fraction, flag_slip, flag_slip_catch, flag_rate;
+  int flag_dist, flag_stretch, flag_fraction, flag_slip, flag_slip_catch, flag_rate;
 
   // Flags for keywords
-  int flag_table, flag_distribution, flag_crit, flag_prob;
+  int flag_table, flag_distribution, flag_crit, flag_prob, flag_tilt;
 
   // Internal methods/functions
   void store_data();
   double store_bond(int, int, int);
   double sample_cdf(long int, int);
   double bond_uniform(long int, int);
+  double barrier(double, double, double, double);
 
   void process_broken(int, int);
   void update_topology();
