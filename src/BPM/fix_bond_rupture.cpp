@@ -527,7 +527,7 @@ void FixBondRupture::post_integrate()
   double **bondstore = fix_bond_history->bondstore;
 
   double dt = (update->dt);
-  double N, b, Nb, lam, lamv, dU, kr;
+  double N, b, Nb, lam, lamv, xi, dU, kr;
 
   // acquire updated ghost atom positions
   // necessary b/c are calling this after integrate, but before Verlet comm
@@ -691,13 +691,14 @@ void FixBondRupture::post_integrate()
       double r = sqrt(rsq);
       double bondforce = fabs(fbond)*r;
 
-      if (force->bond->single_extra < 3) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture prob/tilt");
+      if (force->bond->single_extra < 4) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture prob/tilt");
       
       N    = bond->svector[0];
       b    = bond->svector[1]; 
       lamv = bond->svector[2];
+      xi   = bond->svector[3];
 
-      dU = barrier(bondforce, lamv, kappa, zeta);
+      dU = barrier(xi, lamv, kappa, zeta);
 
       double p_rup = exp(-dU*zeta); // probability of rupture based on barrier height
       kr = N*omega*p_rup;           // rate of rupture based on barrier and attempt frequency
@@ -737,7 +738,7 @@ void FixBondRupture::post_integrate()
    
     // Check the probability constraint
     if (p_rupture <= probability) continue; // bond does not rupture
-    
+    printf("Bond broke with lamv %f and force %f, barrier height %f\n",lamv,xi,dU);
     // Mark bond for potential breaking - mark BOTH atoms symmetrically
     bondlist[n][2] = 0;  // Mark bond as dead in neighbor list
     break_partner[i1] = tag[i2];

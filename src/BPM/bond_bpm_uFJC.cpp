@@ -52,8 +52,8 @@ BondBPMuFJC::BondBPMuFJC(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_BPM_UFJC");
 
-  single_extra = 3;
-  svector = new double[3];
+  single_extra = 4;
+  svector = new double[4];
 
   nmax = 0;
 
@@ -283,6 +283,8 @@ void BondBPMuFJC::compute(int eflag, int vflag)
     // Calculate segmental stretch
     term0 = pow(lam,2.0) - 2 * lam + 1 + (4 / kappa[type] );
     lamv = (lam + 1 + pow(term0,0.5)) / 2;
+
+    //printf("Lamv %f\n",'')
 
     // Calculate bond force
     y = lam - lamv + 1;
@@ -597,7 +599,7 @@ double BondBPMuFJC::single(int type, double rsq, int i, int j, double &fforce)
   double rinv = 1.0 / r;
 
   double r0, rn, r0p, rc, ep;
-  double N, b, Nb, lam, lamv;
+  double N, b, Nb, lam, lamv, xi;
   double numer, denom, term0, term1, term2, y;
 
   // rn, ep, hn can be updated, so search bondlist vs. fix_bond_history->get_atom_value()
@@ -625,7 +627,7 @@ double BondBPMuFJC::single(int type, double rsq, int i, int j, double &fforce)
   lam = r/Nb;
 
   // Calculate segmental stretch
-  term0 = pow(lam,2.0) - 2 * lam + 1 + (4 / kappa[type] );
+  term0 = pow(lam-1,2.0) + (4 / kappa[type] );
   lamv = (lam + 1 + pow(term0,0.5)) / 2;
 
   // Calculate bond force
@@ -634,6 +636,9 @@ double BondBPMuFJC::single(int type, double rsq, int i, int j, double &fforce)
   numer = y*(3.0 - pow(y,2.0));
   denom = 1.0 - pow(y,2.0);
   fforce = -k0[type]*numer/denom/b;
+  xi = numer/denom;
+
+  //if (lamv > 1.2 && n==320) printf(" %d Chain stretch %f, Seg stretch %f, Bondforce %f, y %f, kappa %f \n",n,lam,lamv,xi,y,kappa[type]);
 
   double **x = atom->x;
   double **v = atom->v;
@@ -646,6 +651,8 @@ double BondBPMuFJC::single(int type, double rsq, int i, int j, double &fforce)
   double dot = delx * delvx + dely * delvy + delz * delvz;
   fforce -= gamma[type] * dot * rinv;
   fforce *= rinv;
+
+  
 
   if (smooth_flag) {
     double smooth = (r0 != 0.0) ? (r - r0) / (r0 * fcrit[type]) : 0.0;
@@ -670,7 +677,7 @@ double BondBPMuFJC::single(int type, double rsq, int i, int j, double &fforce)
   svector[0] = N;
   svector[1] = b;
   svector[2] = lamv;
-  //svector[3] = fint;
+  svector[3] = xi;
   //svector[4] = Hn;
 
   return 0.0;
