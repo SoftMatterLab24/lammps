@@ -102,14 +102,15 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
         ndata = 1;
         iarg += 1;
     } else if (strcmp(style_name,"prob/tilt") == 0) {
-        if (iarg+3 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
+        if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
         flag_tilt = 1; flag_prob = 1; param_names = {"zeta","kappa","omega"};
         zeta = utils::numeric(FLERR,arg[iarg],false,lmp);
         kappa = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         omega = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+        dt_eq = utils::numeric(FLERR,arg[iarg+3],false,lmp);
         if (zeta < 0.0 || kappa < 0.0 || omega < 0.0) error->all(FLERR,"Illegal fix bond/rupture command");
-        ndata = 3;
-        iarg += 3;
+        ndata = 4;
+        iarg += 4;
     } else if (strcmp(style_name,"prob/fraction") == 0) {
         if (iarg+1 > narg) error->all(FLERR,"Illegal fix bond/rupture command");
         flag_fraction = 1; flag_prob = 1; param_names = {"fraction"};
@@ -465,6 +466,8 @@ void FixBondRupture::store_data()
                   value = kappa;
                 } else if (l == 3) {
                   value = omega;
+                } else if (l == 4) {
+                  value = dt_eq;
                 }
               } else if (flag_slip){
                 if (l == 1) {
@@ -637,6 +640,7 @@ void FixBondRupture::post_integrate()
             zeta = bondstore[n][0];
             kappa = bondstore[n][1];
             omega = bondstore[n][2];
+            dt_eq = bondstore[n][3];
         } else if (flag_slip){
             k0 = bondstore[n][0];
             f0 = bondstore[n][1];
@@ -703,7 +707,7 @@ void FixBondRupture::post_integrate()
       double p_rup = exp(-dU*zeta); // probability of rupture based on barrier height
       kr = N*omega*p_rup;           // rate of rupture based on barrier and attempt frequency
 
-      p_rupture = 1.0 - exp(-kr*dt);
+      p_rupture = 1.0 - exp(-kr*dt_eq);
     }
     if (flag_slip){
       // Find force in bond
