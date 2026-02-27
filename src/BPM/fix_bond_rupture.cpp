@@ -50,7 +50,7 @@ using namespace FixConst;
 
 FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
   Fix(lmp, narg, arg),
-  bprob(nullptr), random(nullptr), 
+  bprob(nullptr), random(nullptr), break_partner(nullptr), tabindex(nullptr),
   id_fix_bond_history_rupture(nullptr), fix_bond_history(nullptr)
 {
   if (narg < 5) error->all(FLERR,"Illegal fix bond/rupture command");
@@ -70,7 +70,7 @@ FixBondRupture::FixBondRupture(LAMMPS *lmp, int narg, char **arg) :
 
   // style_flags:
   flag_dist = 0; flag_stretch = 0; // distance based
-  flag_fraction = 0; flag_slip = 0; flag_slip_catch = 0; flag_rate = 0; flag_tilt; // prob based
+  flag_fraction = 0; flag_slip = 0; flag_slip_catch = 0; flag_rate = 0; flag_tilt = 0; // prob based
   
   // keyword flags:
   flag_table = 0; flag_distribution = 0; flag_crit = 0, flag_prob = 0;
@@ -268,15 +268,21 @@ FixBondRupture::~FixBondRupture()
   memory->destroy(bprob);
   memory->destroy(break_partner);
   
-  if (fix_bond_history) modify->delete_fix(id_fix_bond_history_rupture);
-  delete[] id_fix_bond_history_rupture;
+  if (fix_bond_history) {
+    modify->delete_fix(id_fix_bond_history_rupture);
+    delete[] id_fix_bond_history_rupture;
+  }
 
-  if (dist_type) delete[] dist_type;
+  if (dist_type) memory->sfree(dist_type);
   if (setflag) memory->destroy(setflag);
   if (tabindex) memory->destroy(tabindex);
 
   for (int m = 0; m < ntables; m++) free_table(&tables[m]);
   memory->sfree(tables);
+
+  delete[] lo; delete[] hi; delete[] mu; delete[] sigma;
+  delete[] lambda; delete[] alpha; delete[] beta;
+  delete[] use_dist;
   
 }
 
@@ -764,6 +770,7 @@ void FixBondRupture::post_integrate()
   for (i = 0; i < nlocal; i++) {
     if (break_partner[i] == 0) continue;  // No partner, so skip
     j = atom->map(break_partner[i]);
+    if (j < 0) continue;
     if (break_partner[j] != tag[i]) continue;  // Both atoms agree to break, so delete the bond
     
     process_broken(i, j);

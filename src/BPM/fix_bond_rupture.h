@@ -45,7 +45,7 @@ class FixBondRupture : public Fix {
   double **bprob;
 
   // Partner tracking for cross-processor bonds
-  tagint *break_partner = nullptr;
+  tagint *break_partner;
 
   // pointer to shared bond history fix (if created)
   class FixBondHistory *fix_bond_history = nullptr;
@@ -65,7 +65,7 @@ class FixBondRupture : public Fix {
   double *lo, *hi, *mu, *sigma, *lambda, *alpha, *beta;
   int *use_dist;
   double *dist_data;
-  char *dist_type;
+  char *dist_type = nullptr;
 
   // Default arguments
   int btype, seed;
