@@ -1,4 +1,3 @@
-// clang-format off
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
    https://www.lammps.org/, Sandia National Laboratories
@@ -11,6 +10,7 @@
 
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
+// clang-format off
 
 #ifndef LMP_MEMORY_KOKKOS_H
 #define LMP_MEMORY_KOKKOS_H
@@ -35,17 +35,15 @@ class MemoryKokkos : public Memory {
 ------------------------------------------------------------------------- */
 
 template <typename TYPE>
-TYPE create_kokkos(TYPE &data, typename TYPE::value_type *&array,
-                   int n1, const char *name)
+TYPE create_kokkos(TYPE &data, typename TYPE::value_type *&array, int n1, const char *name)
 {
   data = TYPE(name,n1);
-  array = data.h_view.data();
+  array = data.view_host().data();
   return data;
 }
 
 template <typename TYPE, typename HTYPE>
-  TYPE create_kokkos(TYPE &data, HTYPE &h_data,
-                     typename TYPE::value_type *&array, int n1,
+  TYPE create_kokkos(TYPE &data, HTYPE &h_data, typename TYPE::value_type *&array, int n1,
                      const char *name)
 {
   data = TYPE(std::string(name),n1);
@@ -56,8 +54,7 @@ template <typename TYPE, typename HTYPE>
 
 
 template <typename TYPE, typename HTYPE>
-  TYPE create_kokkos(TYPE &data, HTYPE &h_data,
-                     int n1, const char *name)
+  TYPE create_kokkos(TYPE &data, HTYPE &h_data, int n1, const char *name)
 {
   data = TYPE(std::string(name),n1);
   h_data = Kokkos::create_mirror_view(data);
@@ -69,13 +66,12 @@ template <typename TYPE, typename HTYPE>
 ------------------------------------------------------------------------- */
 
 template <typename TYPE>
-TYPE grow_kokkos(TYPE &data, typename TYPE::value_type *&array,
-                 int n1, const char *name)
+TYPE grow_kokkos(TYPE &data, typename TYPE::value_type *&array, int n1, const char *name)
 {
   if (array == nullptr) return create_kokkos(data,array,n1,name);
 
   data.resize(n1);
-  array = data.h_view.data();
+  array = data.view_host().data();
   return data;
 }
 
@@ -96,12 +92,11 @@ void destroy_kokkos(TYPE data, typename TYPE::value_type* &array)
 ------------------------------------------------------------------------- */
 
 template <typename TYPE, typename HTYPE>
-  TYPE create_kokkos(TYPE &data, HTYPE &h_data, int n1, int n2,
-                     const char *name)
+  TYPE create_kokkos(TYPE &data, HTYPE &h_data, int n1, int n2, const char *name)
 {
   data = TYPE(std::string(name),n1,n2);
   h_data = Kokkos::create_mirror_view(data);
-  //printf(">>> name: %s\n", name);
+
   return data;
 }
 
@@ -109,16 +104,19 @@ template <typename TYPE>
 TYPE create_kokkos(TYPE &data, typename TYPE::value_type **&array,
                    int n1, int n2, const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   data = TYPE(std::string(name),n1,n2);
   bigint nbytes = ((bigint) sizeof(typename TYPE::value_type *)) * n1;
   array = (typename TYPE::value_type **) smalloc(nbytes,name);
-  //printf(">>> name %s nbytes %d\n", name, nbytes);
+
 
   for (int i = 0; i < n1; i++) {
     if (n2 == 0)
       array[i] = nullptr;
     else
-      array[i] = &data.h_view(i,0);
+      array[i] = &data.view_host()(i,0);
   }
   return data;
 }
@@ -136,6 +134,9 @@ TYPE create4d_offset_kokkos(TYPE &data, typename TYPE::value_type ****&array,
                              int n1, int n2lo, int n2hi, int n3lo, int n3hi, int n4lo, int n4hi,
                              const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   //if (n1 <= 0 || n2lo > n2hi || n3lo > n3hi || n4lo > n4hi) array =  nullptr;
 
   printf("^^^^^ memoryKK->create_4d_offset_kokkos\n");
@@ -163,7 +164,7 @@ TYPE create4d_offset_kokkos(TYPE &data, typename TYPE::value_type ****&array,
             if (n4 == 0)
               array[i][j][k] = nullptr;
             else
-              array[i][j][k] = &data.h_view(i,j,k,0);
+              array[i][j][k] = &data.view_host()(i,j,k,0);
           }
         }
       }
@@ -178,6 +179,9 @@ template <typename TYPE, typename HTYPE>
                      typename TYPE::value_type **&array, int n1, int n2,
                      const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   data = TYPE(std::string(name),n1,n2);
   h_data = Kokkos::create_mirror_view(data);
   bigint nbytes = ((bigint) sizeof(typename TYPE::value_type *)) * n1;
@@ -196,15 +200,18 @@ template <typename TYPE>
 TYPE create_kokkos(TYPE &data, typename TYPE::value_type **&array,
                    int n1, const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   data = TYPE(std::string(name),n1);
   bigint nbytes = ((bigint) sizeof(typename TYPE::value_type *)) * n1;
   array = (typename TYPE::value_type **) smalloc(nbytes,name);
 
   for (int i = 0; i < n1; i++)
-    if (data.h_view.extent(1) == 0)
+    if (data.view_host().extent(1) == 0)
       array[i] = nullptr;
     else
-      array[i] = &data.h_view(i,0);
+      array[i] = &data.view_host()(i,0);
 
   return data;
 }
@@ -217,6 +224,9 @@ template <typename TYPE>
 TYPE grow_kokkos(TYPE &data, typename TYPE::value_type **&array,
                  int n1, int n2, const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   if (array == nullptr) return create_kokkos(data,array,n1,n2,name);
   data.resize(n1,n2);
   bigint nbytes = ((bigint) sizeof(typename TYPE::value_type *)) * n1;
@@ -226,7 +236,7 @@ TYPE grow_kokkos(TYPE &data, typename TYPE::value_type **&array,
     if (n2 == 0)
       array[i] = nullptr;
     else
-      array[i] = &data.h_view(i,0);
+      array[i] = &data.view_host()(i,0);
 
   return data;
 }
@@ -235,6 +245,9 @@ template <typename TYPE>
 TYPE grow_kokkos(TYPE &data, typename TYPE::value_type **&array,
                  int n1, const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   if (array == nullptr) return create_kokkos(data,array,n1,name);
 
   data.resize(n1);
@@ -243,10 +256,10 @@ TYPE grow_kokkos(TYPE &data, typename TYPE::value_type **&array,
   array = (typename TYPE::value_type **) srealloc(array,nbytes,name);
 
   for (int i = 0; i < n1; i++)
-    if (data.h_view.extent(1) == 0)
+    if (data.view_host().extent(1) == 0)
       array[i] = nullptr;
     else
-      array[i] = &data.h_view(i,0);
+      array[i] = &data.view_host()(i,0);
 
   return data;
 }
@@ -258,6 +271,9 @@ TYPE grow_kokkos(TYPE &data, typename TYPE::value_type **&array,
 template <typename TYPE>
 void destroy_kokkos(TYPE data, typename TYPE::value_type** &array)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   if (array == nullptr) return;
   data = TYPE();
   sfree(array);
@@ -272,6 +288,9 @@ template <typename TYPE>
 TYPE create_kokkos(TYPE &data, typename TYPE::value_type ***&array,
                    int n1, int n2, int n3, const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   data = TYPE(std::string(name),n1,n2,n3);
   bigint nbytes = ((bigint) sizeof(typename TYPE::value_type *)) * n1 * n2;
   typename TYPE::value_type **plane = (typename TYPE::value_type **) smalloc(nbytes,name);
@@ -290,7 +309,7 @@ TYPE create_kokkos(TYPE &data, typename TYPE::value_type ***&array,
         if (n3 == 0)
            array[i][j] = nullptr;
          else
-           array[i][j] = &data.h_view(i,j,0);
+           array[i][j] = &data.view_host()(i,j,0);
       }
     }
   }
@@ -302,6 +321,9 @@ template <typename TYPE, typename HTYPE>
                      typename TYPE::value_type ***&array, int n1, int n2, int n3,
                      const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   data = TYPE(std::string(name),n1,n2);
   h_data = Kokkos::create_mirror_view(data);
   bigint nbytes = ((bigint) sizeof(typename TYPE::value_type *)) * n1 * n2;
@@ -321,7 +343,7 @@ template <typename TYPE, typename HTYPE>
         if (n3 == 0)
            array[i][j] = nullptr;
          else
-           array[i][j] = &data.h_view(i,j,0);
+           array[i][j] = &data.view_host()(i,j,0);
       }
     }
   }
@@ -346,6 +368,9 @@ template <typename TYPE>
 TYPE grow_kokkos(TYPE &data, typename TYPE::value_type ***&array,
                    int n1, int n2, int n3, const char *name)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   if (array == nullptr) return create_kokkos(data,array,n1,n2,n3,name);
   data.resize(n1,n2,n3);
   bigint nbytes = ((bigint) sizeof(typename TYPE::value_type *)) * n1 * n2;
@@ -365,7 +390,7 @@ TYPE grow_kokkos(TYPE &data, typename TYPE::value_type ***&array,
         if (n3 == 0)
            array[i][j] = nullptr;
          else
-           array[i][j] = &data.h_view(i,j,0);
+           array[i][j] = &data.view_host()(i,j,0);
       }
     }
   }
@@ -379,6 +404,9 @@ TYPE grow_kokkos(TYPE &data, typename TYPE::value_type ***&array,
 template <typename TYPE>
 void destroy_kokkos(TYPE data, typename TYPE::value_type*** &array)
 {
+  static_assert(std::is_same_v<typename TYPE::array_layout,Kokkos::LayoutRight>,
+    "A Kokkos view must have LayoutRight to alias with legacy data structures");
+
   if (array == nullptr) return;
   data = TYPE();
 
@@ -398,7 +426,7 @@ template <typename TYPE, typename... Indices>
 static std::enable_if_t<TYPE::rank_dynamic == sizeof...(Indices),void> realloc_kokkos(TYPE &data, const char *name, Indices... ns)
 {
   data = TYPE();
-  data = TYPE(std::string(name), ns...);
+  data = TYPE(Kokkos::NoInit(std::string(name)), ns...);
 }
 
 template <typename TYPE, typename... Indices>
@@ -406,7 +434,7 @@ static std::enable_if_t<TYPE::rank_dynamic == sizeof...(Indices) || sizeof...(In
 {
   data = TYPE();
   if constexpr (sizeof...(Indices) != 0)
-    data = TYPE(std::string(name), ns...);
+    data = TYPE(Kokkos::NoInit(std::string(name)), ns...);
 }
 
 /* ----------------------------------------------------------------------
@@ -416,7 +444,7 @@ static std::enable_if_t<TYPE::rank_dynamic == sizeof...(Indices) || sizeof...(In
 template <typename TYPE>
 static double memory_usage(TYPE &data)
 {
-  return data.span() * sizeof(typename TYPE::value_type);
+  return static_cast<double>(data.span() * sizeof(typename TYPE::value_type));
 }
 
 /* ----------------------------------------------------------------------

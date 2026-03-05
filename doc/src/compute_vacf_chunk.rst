@@ -24,7 +24,7 @@ Examples
 Description
 """""""""""
 
-.. versionadded:: TBD
+.. versionadded:: 2Apr2025
 
 Define a computation that calculates the velocity auto-correlation
 function (VACF) for multiple chunks of atoms.
@@ -111,7 +111,7 @@ distance\ :math:`^2` divided by time\ :math:`^2` :doc:`units <units>`.
 
 Restrictions
 """"""""""""
- none
+none
 
 Related commands
 """"""""""""""""
