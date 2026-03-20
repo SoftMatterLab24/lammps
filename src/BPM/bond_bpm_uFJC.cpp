@@ -273,16 +273,16 @@ void BondBPMuFJC::compute(int eflag, int vflag)
     Nb = N * b;
     lam = r/Nb; // Chain stretch
 
+    // Calculate segmental stretch
+    term0 = pow(lam,2.0) - 2 * lam + 1 + (4 / kappa[type] );
+    lamv = (lam + 1 + pow(term0,0.5)) / 2;
+
     //bond stretch criterion
-    if ((lam > lamc[type]) && break_flag && stretch_flag) {
+    if ((lamv > lamc[type]) && break_flag && stretch_flag) {
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
     }
-
-    // Calculate segmental stretch
-    term0 = pow(lam,2.0) - 2 * lam + 1 + (4 / kappa[type] );
-    lamv = (lam + 1 + pow(term0,0.5)) / 2;
 
     //printf("Lamv %f\n",'')
 

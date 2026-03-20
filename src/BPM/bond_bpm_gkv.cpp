@@ -155,8 +155,9 @@ void BondBPMGKV::store_data()
 {
   int i, j, n, m, type, N;
   double delx, dely, delz, r;
-  double b, fn, fs;
+  double b, fs;
   double term1, eta;
+  double fn = 0.0;
   double **x = atom->x;
   double dt = update->dt;
   int **bond_type = atom->bond_type;
@@ -218,7 +219,7 @@ void BondBPMGKV::store_data()
 
       // Compute viscosity and set
       
-      eta = 2.0 * zeta[type] * N;
+      eta = 2.0 * zeta[type];
       fix_bond_history->update_atom_value(i, m, 7, eta); // eta
       bondstore[m][7] = eta; // eta
 
@@ -243,7 +244,7 @@ void BondBPMGKV::compute(int eflag, int vflag)
   int i1, i2, itmp, n, m, type, N;
   double delx, dely, delz, delvx, delvy, delvz;
   double e, ep, rsq, r, rs, rn , rjp , rinv, smooth, fs, fbond, dot;
-  double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1;
+  double b, eta, eta_temp, fn, rjn, qn, rjn1, qn1, yn1;
   double term1, term2, term3, numer, denom, lam, lamb;
 
   ev_init(eflag, vflag);
@@ -306,17 +307,14 @@ void BondBPMGKV::compute(int eflag, int vflag)
     r = sqrt(rsq);    
     rinv = 1.0 / r;
 
-    // Check stability criterion
-    int stable = 1;
-    
     N = bondstore[n][2];
     b = bondstore[n][3];
-    rjp  = bondstore[n][6]; 
+    yn1  = bondstore[n][6];
 
-    if (rjp > 0.8*N*b) {
-      stable = 0;
-    }
-    
+    // Check stability criterion
+    int stable = 1;
+    if (yn1 > 0.5) stable = 0;
+
     if (stable) {
       direct_solve(r, type, n, dt, fs);
     } else {
@@ -324,17 +322,16 @@ void BondBPMGKV::compute(int eflag, int vflag)
     }
 
     fbond = -fs;
-    //bond break criterion !! update
-    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag && !stretch_flag) {  
+    if ((fabs(fbond/Ks[type]) > rcrit[type]) && break_flag && !stretch_flag) {
       bondlist[n][2] = 0;
       process_broken(i1, i2);
       continue;
     }
 
     if (break_flag && stretch_flag) {
-      rs = bondstore[n][0]; 
-      lamb = (rs + N*b) / (N*b);
-      if (lamb > lamc[type]) {
+      double f_cur = bondstore[n][4];
+      double lamv  = 1.0 + f_cur / (Ks[type] * b); // segmental stretch
+      if (lamv > lamc[type]) {
         bondlist[n][2] = 0;
         process_broken(i1, i2);
         continue;
@@ -556,9 +553,6 @@ void BondBPMGKV::read_restart(FILE *fp)
     utils::sfread(FLERR, &zeta[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
@@ -585,28 +579,14 @@ void BondBPMGKV::read_restart(FILE *fp)
   // allocate tables array on all procs
   tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
 
-  // Read tables written by write_restart
-  if (comm->me == 0) {
-    utils::sfread(FLERR, &ntables, sizeof(int), 1, fp, nullptr, error);
-  }
-  MPI_Bcast(&ntables, 1, MPI_INT, 0, world);
-
-  // allocate tables array on all procs
-  if (ntables > 0) {
-    tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
-  }
-
   for (int t = 0; t < ntables; t++) {
     Table *tb = &tables[t];
     null_table(tb);
 
-    int ninput_local = 0;
-    double r0_local = 0.0;
-
     // read header: ninput and r0
     if (comm->me == 0) {
-      utils::sfread(FLERR, &ninput_local, sizeof(int), 1, fp, nullptr, error);
-      utils::sfread(FLERR, &r0_local, sizeof(double), 1, fp, nullptr, error);
+      utils::sfread(FLERR, &tb->ninput, sizeof(int), 1, fp, nullptr, error);
+      utils::sfread(FLERR, &tb->r0, sizeof(double), 1, fp, nullptr, error);
 
       tb->iatomfile = nullptr; tb->jatomfile = nullptr; tb->Nfile = nullptr; tb->bfile = nullptr;
       memory->create(tb->iatomfile, tb->ninput, "bond:iatomfile");
@@ -913,203 +893,155 @@ void BondBPMGKV::bcast_table(Table *tb) // *UPDATED
    
 ------------------------------------------------------------------------- */
 
-void BondBPMGKV::direct_solve(double r, int type, int n, double dt , double &f)
+void BondBPMGKV::direct_solve(double r, int type, int n, double dt, double &f)
 {
-  int    m, N;
-  double rs, rn, rj_sum, b, eta, eta_temp, tau, fn, rjn, qn, rjn1, qn1;
-  double kj, exp_j, alph, qn_pred, rj_pred;
-  double term1, term2, term3, numer, denom, lam;
-  double fpred, fcor;
+  double N, b, eta, tau, K_n, K_c;
+  double fn, qn, yn, yn1, qn1, f_new, f_cor;
+  double beta, alpha;
 
   double **bondstore = fix_bond_history->bondstore;
 
-  // retrieve bond history variables
-  rs = bondstore[n][0];
-  rn = bondstore[n][1];
-  N  = bondstore[n][2];
-  b  = bondstore[n][3];
-  fn = bondstore[n][4];
-   
-  // update bond length in bondstore
-  bondstore[n][1] = r;
-    
-  term1 = 0.0; term2 = 0.0;
-  
-  // Get element specific params
-  qn  = bondstore[n][5];     // old qi
-  rjn = bondstore[n][6];     // old ri
-  eta = bondstore[n][7];     // eta
+  // Retrieve history
+  N   = bondstore[n][2];
+  b   = bondstore[n][3];
+  fn  = bondstore[n][4];
+  qn  = bondstore[n][5];
+  yn  = bondstore[n][6];
+  eta = bondstore[n][7];
 
-  // update stiffness and exponential terms
-  lam = rjn/(N*b);
+  double eta_eff = aT[type] * eta;
 
-  numer = (pow(lam,2.0)- 3.0);
-  denom = (pow(lam,2.0)- 1.0);
-  kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
-  eta_temp = aT[type] * eta;                   // viscosity
+  // --- Predictor: stiffness frozen at y^n ---
+  K_n   = Kj[type] * (3.0 - yn*yn) / (1.0 - yn*yn) / (N * b * b);
+  tau   = eta_eff / K_n;
+  double x = dt / tau;
+  beta  = exp(-x);
+  alpha = (x < 1e-10) ? 1.0 : tau * (1.0 - beta) / dt;
 
-  tau = eta_temp / (2*kj*pow(M_PI,2.0));             // Terminal relaxation time
-  exp_j = exp(-dt / tau);      // exponential term
+  f_new = (r + (qn*beta - alpha*fn) / K_n)
+        / (N / Ks[type] + (1.0 - alpha) / K_n);
 
-  if (dt/eta_temp < 1e-10){
-    alph = 1; // for small dt/eta take limit directly: alpha -> 1
-  } else {
-    alph = tau * (1 - exp_j) / dt;
-  }
+  yn1 = (r - f_new * N / Ks[type]) / (N * b);
+  yn1 = std::max(0.0, std::min(yn1, 0.9999));
 
-  term1 =  (qn*exp_j - alph*fn) / kj;
-  term2 =  (1 - alph) / kj;
- 
-  // Compute trial bond force
-  fpred = (r + term1) / (1 / Ks[type] + term2);
- 
-  // update history variable
-  qn1 = exp_j * qn + (alph) * (fpred - fn);
-       
-  rjn1 = (fpred - qn1) / kj;
-        
-  qn_pred = qn1;
-  rj_pred = rjn1;
-  rj_sum = rjn1; // total length of KV elements
-  
-  // Corrector step
-  rs = r - rj_sum;
-  fcor = Ks[type] * rs;
- 
-  rjn1 = (fcor - qn1) / kj;
-  rjn1 = std::min(rjn1, rj_pred);
-  bondstore[n][5] = qn1;  // qi
-  bondstore[n][6] = rjn1; // ri
+  // --- Corrector: re-evaluate K at midpoint y^{n+1/2} = (y^n + y^{n+1})/2 ---
+  double y_mid = 0.5 * (yn + yn1);
+  K_c   = Kj[type] * (3.0 - y_mid*y_mid) / (1.0 - y_mid*y_mid) / (N * b * b);
+  tau   = eta_eff / K_c;
+  x     = dt / tau;
+  beta  = exp(-x);
+  alpha = (x < 1e-10) ? 1.0 : tau * (1.0 - beta) / dt;
 
-  lam = rjn1/(N*b);
-  numer = (pow(lam,2.0)- 3.0);
-  denom = (pow(lam,2.0)- 1.0);
-  kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
-      
-  qn1 = fcor - rjn1 * kj;
+  f_cor = (r + (qn*beta - alpha*fn) / K_c)
+        / (N / Ks[type] + (1.0 - alpha) / K_c);
 
-  bondstore[n][5]   = qn1;  // update qi
-  bondstore[n][6] = rjn1; // update ri
-  
-  f = fcor; 
+  yn1 = (r - f_cor * N / Ks[type]) / (N * b);
+  yn1 = std::max(0.0, std::min(yn1, 0.9999));
 
-  bondstore[n][0] = rs;    // update rs
-  bondstore[n][4] = f;     // update fn
+  // Update internal viscous variable
+  qn1 = qn*beta + alpha*(f_cor - fn);
 
-  return;
+  // Store updated history
+  bondstore[n][0] = f_cor * N / Ks[type]; // rs
+  bondstore[n][4] = f_cor;                // fn
+  bondstore[n][5] = qn1;                  // qi
+  bondstore[n][6] = yn1;                  // ri (conformational stretch)
+
+  f = f_cor;
 }
 
-void BondBPMGKV::iter_solve(double r, int type, int n, double dt , double &f)
+void BondBPMGKV::iter_solve(double r, int type, int n, double dt, double &f)
 {
-  int    m, N;
-  int    iter_max, iter_local_max;
-  double rs, rn, rjp, rj_sum, rj_low, rj_high, rj_mid;
-  double b, lam, eta, eta_temp, qn1, qnp;
-  double kj, exp_j, alph, qn_pred, rj_pred;
-  double fn, f_low, f_high, f_mid;
-  double R, G;
-  double numer, denom;
-  
+  double N, b, eta;
+  double fn, qn, yn;
+  double y_trial, K_trial, tau_trial, xt, beta_t, alpha_t;
+  double f_a, f_b, f_new, R_a, R_b, R_new, R_fn;
+  double rj_con, rj_geo;
+ 
   double **bondstore = fix_bond_history->bondstore;
-
-  // retrieve bond history variables
-  rs = bondstore[n][0];
-  rn = bondstore[n][1];
-  N  = bondstore[n][2];
-  b  = bondstore[n][3];
-  fn = bondstore[n][4];
-   
-  // update bond length in bondstore
-  bondstore[n][1] = r;
-
-  // bracket stress
-  f_low = 0.5*fn; //0.98 * fn;
-  f_high = 1.1 * fabs(Ks[type] * r);
-  
-  // Global bisection for bond force
-  iter_max = 100;
-  for (int iter = 0; iter < iter_max; iter++) {
-    f_mid = 0.5 * (f_low + f_high);
-
-    rj_sum = 0.0;
-    
-    // Get element specific params
-    //qnp  = bondstore[n][m+5];        // old qi
-    rjp  = bondstore[n][6];      // old ri
-    eta  = bondstore[n][7];    // eta
-
-    // Local bisection for element length
-    iter_local_max = 100;
-
-    // bracket stretch
-    rj_low = 0; // min stretch of element
-    rj_high = N*b; // max stretch of element
-
-    for (int iter_local = 0; iter_local < iter_local_max; iter_local++) {
-      rj_mid = 0.5 * (rj_low + rj_high);
-
-      // get stiffness
-      lam = rj_mid/(N*b);
-      numer = (pow(lam,2.0)- 3.0);
-      denom = (pow(lam,2.0)- 1.0);
-      kj  = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
-
-      eta_temp = aT[type] * eta;               // viscosity
-
-      // residual
-      G = rj_mid + (dt/eta_temp)*2*pow(M_PI,2.0)*kj*rj_mid - (rjp + (dt/eta_temp)*f_mid*2*pow(M_PI,2.0));
-
-      if (G > 0) {
-        rj_high = rj_mid;
-      } else {
-        rj_low = rj_mid;
-      }
-
-      // Convergence check
-      if (fabs(G) < 1e-6) break;
+ 
+  N   = bondstore[n][2];
+  b   = bondstore[n][3];
+  fn  = bondstore[n][4];
+  qn  = bondstore[n][5];
+  yn  = bondstore[n][6];
+  eta = bondstore[n][7];
+ 
+  double eta_eff = aT[type] * eta;
+  double f_max   = 1.5 * fabs(Kj[type] * (3.0 - 0.99*0.99) / (1.0 - 0.99*0.99) / b);
+ 
+  // Warm-start bracket using previous force fn
+  f_a = 0.0; f_b = f_max;
+  if (fn > 0.0 && fn < f_max) {
+    y_trial = (r - fn * N / Ks[type]) / (N * b);
+    if (y_trial > 0.0 && y_trial < 1.0) {
+      K_trial   = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
+      xt        = dt * K_trial / eta_eff;
+      beta_t    = exp(-xt);
+      alpha_t   = (xt < 1e-10) ? 1.0 : (1.0 - beta_t) / xt;
+      rj_con    = (fn*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial;
+      rj_geo    = y_trial * N * b;
+      R_fn      = rj_con - rj_geo;
+      if (R_fn < 0.0) { f_a = fn;  f_b = f_max; }
+      else             { f_a = 0.0; f_b = fn;    }
     }
-
-    rj_pred = rj_mid; // predicted element length at mid force
-    rj_sum = rj_sum + rj_mid;
-    
-
-    // Compute residual
-    R = f_mid/Ks[type] + rj_sum - r;
-
-    if (R > 0) {
-      f_high = f_mid;
+  }
+ 
+  // Evaluate residual at bracket endpoints
+  // -- f_a --
+  y_trial = (r - f_a * N / Ks[type]) / (N * b);
+  K_trial = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
+  xt      = dt * K_trial / eta_eff;
+  beta_t  = exp(-xt);
+  alpha_t = (xt < 1e-10) ? 1.0 : (1.0 - beta_t) / xt;
+  R_a     = (f_a*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial - y_trial * N * b;
+ 
+  // -- f_b --
+  y_trial = (r - f_b * N / Ks[type]) / (N * b);
+  y_trial = std::min(y_trial, 0.9999);
+  K_trial = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
+  xt      = dt * K_trial / eta_eff;
+  beta_t  = exp(-xt);
+  alpha_t = (xt < 1e-10) ? 1.0 : (1.0 - beta_t) / xt;
+  R_b     = (f_b*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial - y_trial * N * b;
+ 
+  // Illinois method: modified regula falsi with superlinear convergence
+  f = f_b;
+  for (int iter = 0; iter < 16; iter++) {
+ 
+    f_new   = (f_a*R_b - f_b*R_a) / (R_b - R_a);
+    y_trial = (r - f_new * N / Ks[type]) / (N * b);
+    y_trial = std::max(0.0, std::min(y_trial, 0.9999));
+    K_trial = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
+    xt      = dt * K_trial / eta_eff;
+    beta_t  = exp(-xt);
+    alpha_t = (xt < 1e-10) ? 1.0 : (1.0 - beta_t) / xt;
+    R_new   = (f_new*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial - y_trial * N * b;
+ 
+    if (fabs(R_new) < 1e-10 || fabs(f_b - f_a) < 1e-12) { f = f_new; break; }
+ 
+    if (R_new * R_b < 0.0) {
+      f_a = f_b; R_a = R_b;
     } else {
-      f_low = f_mid;
+      R_a *= 0.5;  // Illinois modification
     }
-
-    // Convergence check
-    if (fabs(R) < 1e-6) break;
-
+    f_b = f_new; R_b = R_new;
+    f   = f_b;
   }
-  
-  // Update bond force and elastic spring length
-  rs = r - rj_sum;
-  f  = f_mid;
-
-  bondstore[n][0] = rs;    // update rs
-  bondstore[n][4] = f;     // update fn
-
-  // Update bond history variables at converged force
-  bondstore[n][6] = rj_pred;      // old ri
-      
-  // get stiffness
-  lam = rj_pred/(N*b);
-  numer = (pow(lam,2.0)- 3.0);
-  denom = (pow(lam,2.0)- 1.0);
-  kj = Kj[type]*numer/denom/(N*pow(b,2.0)); // new stiffness
-
-  // update history variable
-  qn1 = f_mid - (rj_pred*kj);
-  bondstore[n][5] = qn1;
-  
-  return;
+ 
+  // Update history at converged force
+  double yn1  = (r - f * N / Ks[type]) / (N * b);
+  double K_n1 = Kj[type] * (3.0 - yn1*yn1) / (1.0 - yn1*yn1) / (N * b * b);
+  double tau1 = eta_eff / K_n1;
+  double x1   = dt / tau1;
+  double b1   = exp(-x1);
+  double a1   = (x1 < 1e-10) ? 1.0 : tau1 * (1.0 - b1) / dt;
+ 
+  bondstore[n][0] = f * N / Ks[type];     // rs
+  bondstore[n][4] = f;                    // fn
+  bondstore[n][5] = qn*b1 + a1*(f - fn); // qi
+  bondstore[n][6] = yn1;                  // ri (conformational stretch)
 }
-
 
 /* ---------------------------------------------------------------------- */
 
