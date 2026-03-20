@@ -748,7 +748,7 @@ void FixBondRupture::post_integrate()
    
     // Check the probability constraint
     if (p_rupture <= probability) continue; // bond does not rupture
-    printf("Bond broke with lamv %f and force %f, barrier height %f\n",lamv,xi,dU);
+    //printf("Bond broke with lamv %f and force %f, barrier height %f\n",lamv,xi,dU);
     // Mark bond for potential breaking - mark BOTH atoms symmetrically
     bondlist[n][2] = 0;  // Mark bond as dead in neighbor list
     break_partner[i1] = tag[i2];
