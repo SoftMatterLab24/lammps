@@ -155,9 +155,8 @@ void BondBPMGKV::store_data()
 {
   int i, j, n, m, type, N;
   double delx, dely, delz, r;
-  double b, fs;
+  double b, fn, fs;
   double term1, eta;
-  double fn = 0.0;
   double **x = atom->x;
   double dt = update->dt;
   int **bond_type = atom->bond_type;
@@ -219,7 +218,7 @@ void BondBPMGKV::store_data()
 
       // Compute viscosity and set
       
-      eta = 2.0 * zeta[type];
+      eta = 2.0 * zeta[type] * N;
       fix_bond_history->update_atom_value(i, m, 7, eta); // eta
       bondstore[m][7] = eta; // eta
 
@@ -553,6 +552,9 @@ void BondBPMGKV::read_restart(FILE *fp)
     utils::sfread(FLERR, &zeta[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
+    utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
@@ -579,14 +581,28 @@ void BondBPMGKV::read_restart(FILE *fp)
   // allocate tables array on all procs
   tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
 
+  // Read tables written by write_restart
+  if (comm->me == 0) {
+    utils::sfread(FLERR, &ntables, sizeof(int), 1, fp, nullptr, error);
+  }
+  MPI_Bcast(&ntables, 1, MPI_INT, 0, world);
+
+  // allocate tables array on all procs
+  if (ntables > 0) {
+    tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
+  }
+
   for (int t = 0; t < ntables; t++) {
     Table *tb = &tables[t];
     null_table(tb);
 
+    int ninput_local = 0;
+    double r0_local = 0.0;
+
     // read header: ninput and r0
     if (comm->me == 0) {
-      utils::sfread(FLERR, &tb->ninput, sizeof(int), 1, fp, nullptr, error);
-      utils::sfread(FLERR, &tb->r0, sizeof(double), 1, fp, nullptr, error);
+      utils::sfread(FLERR, &ninput_local, sizeof(int), 1, fp, nullptr, error);
+      utils::sfread(FLERR, &r0_local, sizeof(double), 1, fp, nullptr, error);
 
       tb->iatomfile = nullptr; tb->jatomfile = nullptr; tb->Nfile = nullptr; tb->bfile = nullptr;
       memory->create(tb->iatomfile, tb->ninput, "bond:iatomfile");
@@ -911,6 +927,12 @@ void BondBPMGKV::direct_solve(double r, int type, int n, double dt, double &f)
 
   double eta_eff = aT[type] * eta;
 
+  // Guard against corrupted history
+  if (std::isnan(yn) || yn <= 0.0) yn = 1e-6;
+  if (yn >= 1.0) yn = 0.9999;
+  if (std::isnan(fn)) fn = 0.0;
+  if (std::isnan(qn)) qn = 0.0;
+
   // --- Predictor: stiffness frozen at y^n ---
   K_n   = Kj[type] * (3.0 - yn*yn) / (1.0 - yn*yn) / (N * b * b);
   tau   = eta_eff / K_n;
@@ -936,7 +958,7 @@ void BondBPMGKV::direct_solve(double r, int type, int n, double dt, double &f)
         / (N / Ks[type] + (1.0 - alpha) / K_c);
 
   yn1 = (r - f_cor * N / Ks[type]) / (N * b);
-  yn1 = std::max(0.0, std::min(yn1, 0.9999));
+  yn1 = std::max(1e-6, std::min(yn1, 0.9999));
 
   // Update internal viscous variable
   qn1 = qn*beta + alpha*(f_cor - fn);
@@ -954,25 +976,33 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt, double &f)
 {
   double N, b, eta;
   double fn, qn, yn;
-  double y_trial, K_trial, tau_trial, xt, beta_t, alpha_t;
+  double y_trial, K_trial, xt, beta_t, alpha_t;
   double f_a, f_b, f_new, R_a, R_b, R_new, R_fn;
   double rj_con, rj_geo;
- 
+
   double **bondstore = fix_bond_history->bondstore;
- 
+
   N   = bondstore[n][2];
   b   = bondstore[n][3];
   fn  = bondstore[n][4];
   qn  = bondstore[n][5];
   yn  = bondstore[n][6];
   eta = bondstore[n][7];
- 
+
   double eta_eff = aT[type] * eta;
-  double f_max   = 1.5 * fabs(Kj[type] * (3.0 - 0.99*0.99) / (1.0 - 0.99*0.99) / b);
- 
+
+  // Guard against corrupted history
+  if (std::isnan(yn) || yn <= 0.0) yn = 1e-10;
+  if (yn >= 1.0) yn = 0.9999;
+  if (std::isnan(fn)) fn = 0.0;
+  if (std::isnan(qn)) qn = 0.0;
+
+  double f_max = 1.5 * fabs(Kj[type] * (3.0 - 0.99*0.99) / (1.0 - 0.99*0.99) / b);
+  double f_min = -f_max;
+
   // Warm-start bracket using previous force fn
-  f_a = 0.0; f_b = f_max;
-  if (fn > 0.0 && fn < f_max) {
+  f_a = f_min; f_b = f_max;
+  if (fn > f_min && fn < f_max) {
     y_trial = (r - fn * N / Ks[type]) / (N * b);
     if (y_trial > 0.0 && y_trial < 1.0) {
       K_trial   = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
@@ -982,44 +1012,43 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt, double &f)
       rj_con    = (fn*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial;
       rj_geo    = y_trial * N * b;
       R_fn      = rj_con - rj_geo;
-      if (R_fn < 0.0) { f_a = fn;  f_b = f_max; }
-      else             { f_a = 0.0; f_b = fn;    }
+      if (R_fn < 0.0) { f_a = fn;   f_b = f_max; }
+      else             { f_a = f_min; f_b = fn;   }
     }
   }
- 
+
   // Evaluate residual at bracket endpoints
   // -- f_a --
-  y_trial = (r - f_a * N / Ks[type]) / (N * b);
+  y_trial = std::max(1e-6, std::min((r - f_a * N / Ks[type]) / (N * b), 0.9999));
   K_trial = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
   xt      = dt * K_trial / eta_eff;
   beta_t  = exp(-xt);
   alpha_t = (xt < 1e-10) ? 1.0 : (1.0 - beta_t) / xt;
   R_a     = (f_a*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial - y_trial * N * b;
- 
+
   // -- f_b --
-  y_trial = (r - f_b * N / Ks[type]) / (N * b);
-  y_trial = std::min(y_trial, 0.9999);
+  y_trial = std::max(1e-6, std::min((r - f_b * N / Ks[type]) / (N * b), 0.9999));
   K_trial = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
   xt      = dt * K_trial / eta_eff;
   beta_t  = exp(-xt);
   alpha_t = (xt < 1e-10) ? 1.0 : (1.0 - beta_t) / xt;
   R_b     = (f_b*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial - y_trial * N * b;
- 
+
   // Illinois method: modified regula falsi with superlinear convergence
   f = f_b;
   for (int iter = 0; iter < 16; iter++) {
- 
+
+    if (fabs(R_b - R_a) < 1e-14) break;
     f_new   = (f_a*R_b - f_b*R_a) / (R_b - R_a);
-    y_trial = (r - f_new * N / Ks[type]) / (N * b);
-    y_trial = std::max(0.0, std::min(y_trial, 0.9999));
+    y_trial = std::max(1e-6, std::min((r - f_new * N / Ks[type]) / (N * b), 0.9999));
     K_trial = Kj[type] * (3.0 - y_trial*y_trial) / (1.0 - y_trial*y_trial) / (N * b * b);
     xt      = dt * K_trial / eta_eff;
     beta_t  = exp(-xt);
     alpha_t = (xt < 1e-10) ? 1.0 : (1.0 - beta_t) / xt;
     R_new   = (f_new*(1.0 - alpha_t) - qn*beta_t + alpha_t*fn) / K_trial - y_trial * N * b;
- 
+
     if (fabs(R_new) < 1e-10 || fabs(f_b - f_a) < 1e-12) { f = f_new; break; }
- 
+
     if (R_new * R_b < 0.0) {
       f_a = f_b; R_a = R_b;
     } else {
@@ -1028,15 +1057,15 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt, double &f)
     f_b = f_new; R_b = R_new;
     f   = f_b;
   }
- 
+
   // Update history at converged force
-  double yn1  = (r - f * N / Ks[type]) / (N * b);
+  double yn1  = std::max(1e-10, std::min((r - f * N / Ks[type]) / (N * b), 0.9999));
   double K_n1 = Kj[type] * (3.0 - yn1*yn1) / (1.0 - yn1*yn1) / (N * b * b);
   double tau1 = eta_eff / K_n1;
   double x1   = dt / tau1;
   double b1   = exp(-x1);
   double a1   = (x1 < 1e-10) ? 1.0 : tau1 * (1.0 - b1) / dt;
- 
+
   bondstore[n][0] = f * N / Ks[type];     // rs
   bondstore[n][4] = f;                    // fn
   bondstore[n][5] = qn*b1 + a1*(f - fn); // qi
