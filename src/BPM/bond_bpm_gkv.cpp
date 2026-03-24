@@ -155,8 +155,7 @@ void BondBPMGKV::store_data()
 {
   int i, j, n, m, type, N;
   double delx, dely, delz, r;
-  double b, fn, fs;
-  double term1, eta;
+  double b, eta;
   double **x = atom->x;
   double dt = update->dt;
   int **bond_type = atom->bond_type;
@@ -184,46 +183,34 @@ void BondBPMGKV::store_data()
       domain->minimum_image(FLERR, delx, dely, delz);
       r = sqrt(delx * delx + dely * dely + delz * delz);
 
-      // compute initial bond force
-      //iter_solve(r, type, n, dt, fs);
-      //fn = fs; // for now assume zero initial force
+      if (r < EPSILON) {
+        error->one(FLERR, "Bond reference length too small");
+      }
 
-      fix_bond_history->update_atom_value(i, m, 0, r); // rs
-      fix_bond_history->update_atom_value(i, m, 1, r); // rn
-      fix_bond_history->update_atom_value(i, m, 2, N); // N
-      fix_bond_history->update_atom_value(i, m, 3, b); // b
-      fix_bond_history->update_atom_value(i, m, 4, fn);// fn
+      eta = 2.0 * zeta[type] * N;
+
+      fix_bond_history->update_atom_value(i, m, 0, r);   // rs
+      fix_bond_history->update_atom_value(i, m, 1, r);   // rn
+      fix_bond_history->update_atom_value(i, m, 2, N);   // N
+      fix_bond_history->update_atom_value(i, m, 3, b);   // b
+      fix_bond_history->update_atom_value(i, m, 4, 0);   // fn
+      fix_bond_history->update_atom_value(i, m, 5, 0);   // qi
+      fix_bond_history->update_atom_value(i, m, 6, 0);   // ri
+      fix_bond_history->update_atom_value(i, m, 7, eta); // eta
 
       bondstore[m][0] = r;
       bondstore[m][1] = r;
       bondstore[m][2] = N;
       bondstore[m][3] = b;
-      bondstore[m][4] = fn;
-
-      const Table *tb = &tables[tabindex[type]];
-      if (r < EPSILON) {
-        error->one(FLERR, "Bond reference length too small");
-      }
-
-      // Set KV element initial values
-      dt_temp = dt;
-
-      // Set internal viscous history variables to zero
-      fix_bond_history->update_atom_value(i, m, 5, 0);  // qi
+      bondstore[m][4] = 0;
       bondstore[m][5] = 0;
-
-      // Set intial lengths of Kelvin-Voigt elements to zero
-      fix_bond_history->update_atom_value(i, m, 6, 0); // ri
       bondstore[m][6] = 0;
+      bondstore[m][7] = eta;
 
-      // Compute viscosity and set
-      
-      eta = 2.0 * zeta[type] * N;
-      fix_bond_history->update_atom_value(i, m, 7, eta); // eta
-      bondstore[m][7] = eta; // eta
-
+      dt_temp = dt;
     }
   }
+
   fix_bond_history->post_neighbor();
 }
 
@@ -275,13 +262,9 @@ void BondBPMGKV::compute(int eflag, int vflag)
 
     const Table *tb = &tables[tabindex[type]];
 
-    // Update table (exponential constants)
-    if (!(dt == dt_temp)) {
-      update_table(type); // if the timestep has changed
-    }
-    
-    if (!(aT[type] == aT_temp[type])) {
-      update_table(type); // if the shift factor has changed
+    // Update if timestep or shift factor has changed
+    if (!(dt == dt_temp) || !(aT[type] == aT_temp[type])) {
+      update_table(type);
     }
 
     // Ensure pair is always ordered to ensure numerical operations
@@ -928,7 +911,7 @@ void BondBPMGKV::direct_solve(double r, int type, int n, double dt, double &f)
   double eta_eff = aT[type] * eta;
 
   // Guard against corrupted history
-  if (std::isnan(yn) || yn <= 0.0) yn = 1e-6;
+  if (std::isnan(yn) || yn <= 0.0) yn = 1e-10;
   if (yn >= 1.0) yn = 0.9999;
   if (std::isnan(fn)) fn = 0.0;
   if (std::isnan(qn)) qn = 0.0;
@@ -958,7 +941,7 @@ void BondBPMGKV::direct_solve(double r, int type, int n, double dt, double &f)
         / (N / Ks[type] + (1.0 - alpha) / K_c);
 
   yn1 = (r - f_cor * N / Ks[type]) / (N * b);
-  yn1 = std::max(1e-6, std::min(yn1, 0.9999));
+  yn1 = std::max(1e-10, std::min(yn1, 0.9999));
 
   // Update internal viscous variable
   qn1 = qn*beta + alpha*(f_cor - fn);
@@ -1071,6 +1054,7 @@ void BondBPMGKV::iter_solve(double r, int type, int n, double dt, double &f)
   bondstore[n][5] = qn*b1 + a1*(f - fn); // qi
   bondstore[n][6] = yn1;                  // ri (conformational stretch)
 }
+
 
 /* ---------------------------------------------------------------------- */
 
