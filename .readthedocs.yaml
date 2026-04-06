@@ -4,6 +4,15 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
+  jobs:
+    pre_build:
+      - sed
+          -e "s,@DOXYGEN_XML_DIR@,,g"
+          -e "s,@LAMMPS_SOURCE_DIR@,${READTHEDOCS_REPOSITORY_PATH}/src,g"
+          -e "s,@LAMMPS_PYTHON_DIR@,${READTHEDOCS_REPOSITORY_PATH}/python,g"
+          -e "s,@LAMMPS_DOC_DIR@,${READTHEDOCS_REPOSITORY_PATH}/doc,g"
+          doc/utils/sphinx-config/conf.py.in
+          > doc/utils/sphinx-config/conf.py
 
 sphinx:
   configuration: doc/utils/sphinx-config/conf.py
