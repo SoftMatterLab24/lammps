@@ -220,7 +220,9 @@ accelerated styles exist.
 * :doc:`bond/break <fix_bond_break>` - break bonds on the fly
 * :doc:`bond/create <fix_bond_create>` - create bonds on the fly
 * :doc:`bond/create/angle <fix_bond_create>` - create bonds on the fly with angle constraints
+* :doc:`bond/dynamic <fix_bond_dynamic>` - dynamically create and break bonds
 * :doc:`bond/react <fix_bond_react>` - apply topology changes to model reactions
+* :doc:`bond/rupture <fix_bond_rupture>` - deterministic and stochastic bond rupture
 * :doc:`bond/swap <fix_bond_swap>` - Monte Carlo bond swapping
 * :doc:`box/relax <fix_box_relax>` - relax box size during energy minimization
 * :doc:`charge/regulation <fix_charge_regulation>` - Monte Carlo sampling of charge regulation

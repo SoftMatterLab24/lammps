@@ -20,7 +20,7 @@ OPT.
    *
    *
    *
-   *
+   * :doc:`bpm/prony <bond_bpm_prony>`
    * :doc:`bpm/rotational <bond_bpm_rotational>`
    * :doc:`bpm/spring <bond_bpm_spring>`
    * :doc:`bpm/spring/plastic <bond_bpm_spring_plastic>`
@@ -42,6 +42,9 @@ OPT.
    * :doc:`oxdna/fene <bond_oxdna>`
    * :doc:`oxdna2/fene <bond_oxdna>`
    * :doc:`oxrna2/fene <bond_oxdna>`
+   * :doc:`poly/FJC <bond_poly_FJC>`
+   * :doc:`poly/uFJC <bond_poly_uFJC>`
+   * :doc:`poly/dFJC <bond_poly_dFJC>`
    * :doc:`quartic (o) <bond_quartic>`
    * :doc:`rheo/shell <bond_rheo_shell>`
    * :doc:`special <bond_special>`

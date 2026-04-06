@@ -38,7 +38,9 @@ OPT.
    * :doc:`bond/break <fix_bond_break>`
    * :doc:`bond/create <fix_bond_create>`
    * :doc:`bond/create/angle <fix_bond_create>`
+   * :doc:`bond/dynamic <fix_bond_dynamic>`
    * :doc:`bond/react <fix_bond_react>`
+   * :doc:`bond/rupture <fix_bond_rupture>`
    * :doc:`bond/swap <fix_bond_swap>`
    * :doc:`box/relax <fix_box_relax>`
    * :doc:`brownian <fix_brownian>`

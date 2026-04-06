@@ -1,7 +1,7 @@
 .. index:: fix bond/rupture
 
 fix bond/rupture command
-======================
+========================
 
 Syntax
 """"""
@@ -119,10 +119,10 @@ increasing force. This is achieved with the two-pathway model:
 
  k_r^{slip-catch} =k_{s0} \exp{ \left( \frac{f}{fs0} \right)} + k_{c0} \exp{ \left( -\frac{f}{fc0} \right)}
 
-where :math:`f` is the bonds force, :math:`k_{s0}` and 
-:math:`k_{c0}` are the nominal rupture rates of the slip 
+where :math:`f` is the bonds force, :math:`k_s0` and 
+:math:`k_c0` are the nominal rupture rates of the slip 
 and catch pathways respectively. The force-sensitivity of
-the slip and catch barriers are given by :math:`fs0 and :math:`fc0.
+the slip and catch barriers are given by :math:`fs0` and :math:`fc0`.
 
 The *bond/table* keyword allows a unique rupture criterion to be
 defined on a per bond basis, by specifying a tabulated file with 

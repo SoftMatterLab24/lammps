@@ -84,6 +84,7 @@ accelerated styles exist.
 * :doc:`zero <bond_zero>` - topology but no interactions
 * :doc:`hybrid <bond_hybrid>` - define multiple styles of bond interactions
 
+* :doc:`bpm/prony <bond_bpm_prony>` - breakable bond with Prony series viscoelasticity
 * :doc:`bpm/rotational <bond_bpm_rotational>` - breakable bond with forces and torques based on deviation from reference state
 * :doc:`bpm/spring <bond_bpm_spring>` - breakable bond with forces based on deviation from reference length
 * :doc:`bpm/spring/plastic <bond_bpm_spring_plastic>` - a similar breakable bond with plastic yield
@@ -105,6 +106,9 @@ accelerated styles exist.
 * :doc:`oxdna/fene <bond_oxdna>` - modified FENE bond suitable for DNA modeling
 * :doc:`oxdna2/fene <bond_oxdna>` - same as oxdna but used with different pair styles
 * :doc:`oxrna2/fene <bond_oxdna>` - modified FENE bond suitable for RNA modeling
+* :doc:`poly/FJC <bond_poly_FJC>` -  finitely extensible freely jointed polymer chain (bond)
+* :doc:`poly/uFJC <bond_poly_uFJC>` - extensible freely jointed polymer chain (bond)
+* :doc:`poly/dFJC <bond_poly_dFJC>` - dissipative extensible freely jointed polymer chain (bond)
 * :doc:`quartic <bond_quartic>` - breakable quartic bond
 * :doc:`rheo/shell <bond_rheo_shell>` - shell bond for oxidation modeling in RHEO
 * :doc:`special <bond_special>` - enable special bond exclusions for 1-5 pairs and beyond

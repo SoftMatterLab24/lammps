@@ -90,6 +90,7 @@ Packages howto
    Howto_drude
    Howto_drude2
    Howto_peri
+   Howto_polynet
    Howto_manifold
    Howto_rheo
    Howto_spins

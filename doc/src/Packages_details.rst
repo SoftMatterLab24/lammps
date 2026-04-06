@@ -99,6 +99,7 @@ gives those details.
    * :ref:`PLUGIN <PKG-PLUGIN>`
    * :ref:`PLUMED <PKG-PLUMED>`
    * :ref:`POEMS <PKG-POEMS>`
+   * :ref:`POLY-NET <PKG-POLY-NET>`
    * :ref:`PTM <PKG-PTM>`
    * :ref:`PYTHON <PKG-PYTHON>`
    * :ref:`QEQ <PKG-QEQ>`
@@ -2438,6 +2439,33 @@ This package has :ref:`specific installation instructions <poems>` on the :doc:`
 * ``lib/poems/README``
 * :doc:`fix poems <fix_poems>`
 * ``examples/rigid``
+
+----------
+
+.. _PKG-POLY-NET:
+
+POLY-NET package
+-----------------
+
+**Contents:**
+
+Pair styles, bond styles, fixes, and computes for mesoscale polymer
+network models for simulations of solids and fracture.  See the
+:doc:`Howto poly-net <Howto_polynet>` page for an overview.
+
+**Authors:** Saleh Assadi (CU Boulder) and Zachary White (CU Boulder)
+
+.. versionadded:: 4May2022
+
+**Supporting info:**
+
+* ``src/POLY-NET``: filenames -> commands
+* :doc:`Howto poly-net <Howto_polynet>`
+* :doc:`bond_style poly/FJC <bond_poly_FJC>`
+* :doc:`bond_style poly/uFJC <bond_poly_uFJC>`
+* :doc:`bond_style poly/dFJC <bond_poly_dFJC>`
+* :doc:`fix bond/rupture <fix_bond_rupture>`
+* :doc:`fix bond/dynamic <fix_bond_dynamic>`
 
 ----------
 

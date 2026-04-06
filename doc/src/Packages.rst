@@ -405,6 +405,11 @@ whether an extra library is needed to build and use the package:
      - :doc:`fix poems <fix_poems>`
      - rigid
      - int
+   * - :ref:`POLY-NET <PKG-POLY-NET>`
+     - polymer network models
+     - :doc:`Howto poly-net <Howto_polynet>`
+     - n/a
+     - no
    * - :ref:`PTM <PKG-PTM>`
      - Polyhedral Template Matching
      - :doc:`compute ptm/atom <compute_ptm_atom>`
