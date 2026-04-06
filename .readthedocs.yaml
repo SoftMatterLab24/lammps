@@ -15,6 +15,8 @@ build:
           > doc/src/conf.py
       - cp doc/utils/sphinx-config/LAMMPSLexer.py doc/src/
       - cp -r doc/utils/sphinx-config/_themes doc/src/_themes
+    post_build:
+      - cp $READTHEDOCS_OUTPUT/html/Manual.html $READTHEDOCS_OUTPUT/html/index.html
 
 sphinx:
   configuration: doc/src/conf.py
