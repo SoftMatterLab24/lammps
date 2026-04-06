@@ -15,7 +15,7 @@ build:
           > doc/utils/sphinx-config/conf.py
 
 sphinx:
-  configuration: doc/utils/sphinx-config/conf.py
+  configuration: doc/utils/sphinx-config/conf.py.in
 
 python:
   install:
