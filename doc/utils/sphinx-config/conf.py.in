@@ -214,7 +214,7 @@ html_title = "LAMMPS documentation"
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-html_logo = '_static/lammps-logo.png'
+html_logo = '_static/smm-lammps-logo.png'
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs.  This file should be a Windows icon file (.ico) being 16x16 or 32x32
@@ -302,9 +302,11 @@ mathjax_path = 'mathjax/es5/tex-mml-chtml.js'
 # add :lammps: role for inline LAMMPS code highlight
 rst_prolog = r"""
 
-.. only:: html
+.. raw:: html
 
-   :math:`\renewcommand{\AA}{\text{Å}}`
+   <div style="display:none">
+   \(\renewcommand{\AA}{\text{Å}}\)
+   </div>
 
 .. role:: lammps(code)
     :language: LAMMPS
