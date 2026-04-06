@@ -12,10 +12,10 @@ build:
           -e "s,@LAMMPS_PYTHON_DIR@,${READTHEDOCS_REPOSITORY_PATH}/python,g"
           -e "s,@LAMMPS_DOC_DIR@,${READTHEDOCS_REPOSITORY_PATH}/doc,g"
           doc/utils/sphinx-config/conf.py.in
-          > doc/utils/sphinx-config/conf.py
+          > doc/src/conf.py
 
 sphinx:
-  configuration: doc/utils/sphinx-config/conf.py.in
+  configuration: doc/src/conf.py
 
 python:
   install:
