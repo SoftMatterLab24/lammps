@@ -4,30 +4,8 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.11"
-  jobs:
-    pre_build:
-      - sed
-          -e "s,@DOXYGEN_XML_DIR@,,g"
-          -e "s,@LAMMPS_SOURCE_DIR@,${READTHEDOCS_REPOSITORY_PATH}/src,g"
-          -e "s,@LAMMPS_PYTHON_DIR@,${READTHEDOCS_REPOSITORY_PATH}/python,g"
-          -e "s,@LAMMPS_DOC_DIR@,${READTHEDOCS_REPOSITORY_PATH}/doc,g"
-          doc/utils/sphinx-config/conf.py.in
-          > doc/src/conf.py
-      - cp doc/utils/sphinx-config/LAMMPSLexer.py doc/src/
-      - cp -r doc/utils/sphinx-config/_themes doc/src/_themes
-      - cp -r doc/utils/sphinx-config/_static doc/src/_static
-      - cp -r doc/utils/sphinx-config/_extra doc/src/_extra
-      - sed -i
-          "s|mathjax_path = 'mathjax/es5/tex-mml-chtml.js'|mathjax_path = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js'|"
-          doc/src/conf.py
-    post_build:
-      - cp $READTHEDOCS_OUTPUT/html/Manual.html $READTHEDOCS_OUTPUT/html/index.html
-
-sphinx:
-  configuration: doc/src/conf.py
-
-python:
-  install:
-    - method: pip
-      path: doc/utils/converters
-    - requirements: doc/utils/requirements.txt
+  commands:
+    - cd doc && make html
+    - mkdir -p $READTHEDOCS_OUTPUT/html
+    - cp -r doc/html/* $READTHEDOCS_OUTPUT/html/
+    - cp $READTHEDOCS_OUTPUT/html/Manual.html $READTHEDOCS_OUTPUT/html/index.html
