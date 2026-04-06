@@ -13,6 +13,8 @@ build:
           -e "s,@LAMMPS_DOC_DIR@,${READTHEDOCS_REPOSITORY_PATH}/doc,g"
           doc/utils/sphinx-config/conf.py.in
           > doc/src/conf.py
+      - cp doc/utils/sphinx-config/LAMMPSLexer.py doc/src/
+      - cp -r doc/utils/sphinx-config/_themes doc/src/_themes
 
 sphinx:
   configuration: doc/src/conf.py
