@@ -302,11 +302,9 @@ mathjax_path = 'mathjax/es5/tex-mml-chtml.js'
 # add :lammps: role for inline LAMMPS code highlight
 rst_prolog = r"""
 
-.. raw:: html
+.. only:: html
 
-   <div style="display:none">
-   \(\renewcommand{\AA}{\text{Å}}\)
-   </div>
+   :math:`\renewcommand{\AA}{\text{Å}}`
 
 .. role:: lammps(code)
     :language: LAMMPS
