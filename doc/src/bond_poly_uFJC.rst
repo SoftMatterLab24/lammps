@@ -1,353 +1,253 @@
 .. index:: bond_style poly/uFJC
 
 bond_style poly/uFJC command
-=============================
+============================
 
 Syntax
 """"""
 
 .. code-block:: LAMMPS
 
-   bond_style poly/uFJC N keyword value attribute1 attribute2 ...
+   bond_style poly/uFJC keyword value ...
 
-* N = allocate history variables for N Mawell elements
-* optional keyword =  *store/local* or *overlay/pair* or *smooth* or *normalize* or *break* or *plastic* or *nonlinear* or *temp/shift*
+* optional keyword = *overlay/pair* or *smooth* or *break*
 
   .. parsed-literal::
-
-       *store/local* values = fix_ID N attributes ...
-          * fix_ID = ID of associated internal fix to store data
-          * N = prepare data for output every this many timesteps
-          * attributes = zero or more of the below attributes may be appended
-
-            *id1, id2* = IDs of two atoms in the bond
-            *time* = the timestep the bond broke
-            *x, y, z* = the center of mass position of the two atoms when the bond broke (distance units)
-            *x/ref, y/ref, z/ref* = the initial center of mass position of the two atoms (distance units)
 
        *overlay/pair* value = *yes* or *no*
           bonded particles will still interact with pair forces
 
        *smooth* value = *yes* or *no*
-          smooths bond forces near the breaking point
-
-       *normalize* value = *yes* or *no*
-          normalizes bond forces by the reference length
+          accepted by the command; the current implementation only applies it in the bond single() path, not in the main compute force calculation
 
        *break* value = *yes* or *no*
           indicates whether bonds break during a run
-
-       *plastic* value = *yes* or *no*
-          indicates whether bonds plastically deform
-
-       *nonlinear* value = *yes* or *no*
-          indicates whether nonlinear option is used
-
-       *temp/shift* value = *yes* or *no*
-          indicates whether the viscous elements are multiplicatively shifted
-
 
 Examples
 """"""""
 
 .. code-block:: LAMMPS
 
-   bond_style bpm/prony 1
-   bond_coeff 1 1.0 0.4 0.1 file.table keyword 1.0 1.0 0.0
+   bond_style poly/uFJC
+   bond_coeff 1 1.0 100.0 10.0 0.1 bond.table CHAINS
 
-   bond_style bpm/prony 1 plastic yes nonlinear yes
-   bond_coeff 1 1.0 0.4 0.1 file1.table keyword 1.0 1.0 0.0
-   bond_coeff 2 5.0 0.6 0.1 file2.table keyword 0.2 2.0 0.0
+   bond_style poly/uFJC break yes overlay/pair yes smooth no
+   bond_coeff 1 1.0 100.0 10.0 0.1 bond.table CHAINS stretch 1.05
 
-   bond_style bpm/prony 1 myfix 1000 time id1 id2
-   dump 1 all local 1000 dump.broken f_myfix[1] f_myfix[2] f_myfix[3]
-   dump_modify 1 write_header no
+   compute 2 all bond/local dist force b1 b2 b3 b4
 
 Description
 """""""""""
 
-The *bpm/prony* bond style computes forces based on
-deviations from the initial reference state of the two atoms, strain and stress history. The
-reference length :math:`r_0` is stored by each bond when it is first computed in
-the setup of a run. Initially, the previous length of the bond :math:`r^{t-1}`
-is set equal to :math:`r_0` but evolves during the run. Data is then preserved across
-run commands and is written to :doc:`binary restart files <restart>` such that restarting
-the system will not reset the reference and previous states of a bond.
+The *poly/uFJC* bond style computes a central force for an extensible
+freely jointed chain. For each bonded atom pair, the style reads the
+chain parameters :math:`N` and :math:`b` from a table file, where
+:math:`N` is the number of Kuhn segments and :math:`b` is the Kuhn
+length. The contour length of the chain is then :math:`N b`.
 
-This bond style only applies central-body forces which conserve the
-translational and rotational degrees of freedom of a bonded set of
-particles. The bond force follows a linear viscoelastic formulation based 
-on a generalized Maxwell element, as outlined in :ref:`(Kaliske) <Kaliske1>`. 
-The bond force has a magnitude of
+The implementation also stores the initial bond length :math:`r_0` when
+the bond is first initialized. That stored reference state is preserved
+across subsequent run commands and written to :doc:`binary restart files
+<restart>`. The constitutive force law itself is based on the current
+bond length :math:`r` together with the per-bond chain parameters
+:math:`N` and :math:`b`.
 
-.. math::
-
-   F = w (F_{el} + H_d)
-
-where :math:`F_{el}` is the force contribution from the rate-independent
-elastic element, and :math:`H_{d}` is the contribution from the rate-dependent 
-viscoelastic (Maxwell) elements, and :math:`w` is an optional smoothing factor discussed below.
-The elastic force has a magnitude of
+The chain stretch is defined as
 
 .. math::
 
-   F_{el} = k_0 (r - r_0)
+   \lambda = \frac{r}{N b}
 
-where :math:`k_0` is a stiffness, :math:`r` is the current distance
-and :math:`r_0` is the initial distance between the two particles.
-The viscoelastic force has a magnitude of
+and the model computes a segmental stretch
 
 .. math::
 
-   H_{d} = \sum_{j=1}^{n} h_j^t
+   \lambda_v = \frac{\lambda + 1 + \sqrt{(\lambda - 1)^2 + 4/\kappa}}{2}
 
-where the total viscoelastic force is the sum of :math:`j = 1` to :math:`n` 
-Maxwell elements. The force contributed by each :math:`j`-th Maxwell element
-at the current timestep :math:`t` is given as
-
-.. math::
-
-   h_j^t = \exp{ \left(\frac{-k_j \Delta t}{\eta_j}\right)} h_j^{t-1} + \frac{\eta_j}{\Delta t} \left[1 - \exp{\left(\frac{-k_j \Delta t}{\eta_j}\right)} \right] (r^{t-1} - r)
-
-where :math:`k_j` is a stiffness, :math:`\eta_j` is a viscosity, :math:`\Delta t` is the timestep,
-:math:`r^{t-1}` is the previous bond length, :math:`r` is the current bond length, and :math:`h_j^{t-1}`
-is the viscoelastic force from the previous timestep. The stiffness and viscosity coefficients for the
-Maxwell elements are stored in a tabulated file. Note that as defined in the formula
-the viscosity :math:`\eta_j` really has units of (force*time units). It would need to be divided 
-by a per-bond area to have units of (pressure * time), but a bonds area is not well defined or
-easy to compute.
-
-Bonds will break at a strain of :math:`\epsilon_c`.  This is done by setting
-the bond type to 0 such that forces are no longer computed.
-
-An additional damping force is applied to the bonded
-particles.  This force is proportional to the difference in the
-normal velocity of particles using a similar construction as
-dissipative particle dynamics :ref:`(Groot) <Groot4>`:
+where :math:`\kappa` is the extensibility parameter for the Kuhn
+segments. The entropic stretch variable used by the force law is then
 
 .. math::
 
-   F_d = - \gamma w (\hat{r} \bullet \vec{v})
+   y = \lambda - \lambda_v + 1
+
+and the corresponding inverse-Langevin factor is
+
+.. math::
+
+   \xi = \frac{y(3-y^2)}{1-y^2}
+
+The scalar bond force implemented by this style is
+
+.. math::
+
+   F = -\frac{k_0}{b} \xi
+
+so that explicitly
+
+.. math::
+
+   F = -\frac{k_0}{b} \frac{y(3-y^2)}{1-y^2}
+
+An additional dissipative contribution is added in the bond direction,
+proportional to the relative normal velocity of the bonded atoms:
+
+.. math::
+
+   F_d = - \gamma (\hat{r} \bullet \vec{v})
 
 where :math:`\gamma` is the damping strength, :math:`\hat{r}` is the
-radial normal vector, and :math:`\vec{v}` is the velocity difference
-between the two particles.
+bond unit vector, and :math:`\vec{v}` is the relative velocity.
 
-The smoothing factor :math:`w` can be added or removed by setting the
-*smooth* keyword to *yes* or *no*, respectively. It is constructed such
-that forces smoothly go to zero, avoiding discontinuities, as bonds
-approach the critical strain
+By default, rupture is controlled by the force threshold
+:math:`f_c`. The code breaks the bond when the magnitude of the uFJC
+bond force exceeds :math:`f_c`. This is done by setting the bond type
+to 0 so that the bond no longer contributes forces.
 
-.. math::
+Alternatively, a stretch-based rupture criterion can be selected by
+adding the optional *stretch* argument to the :doc:`bond_coeff
+<bond_coeff>` command. If *stretch* is present, rupture switches from
+the default force-based criterion to a segmental-stretch criterion, and
+the bond breaks when :math:`\lambda_v > \lambda_c`. In the current
+implementation the command only requires :math:`\lambda_c > 0`. Since
+:math:`\lambda_v` is the segmental stretch, choosing
+:math:`\lambda_c > 1` corresponds to rupture after the Kuhn segments
+have stretched beyond their undeformed length.
 
-   w = 1.0 - \left( \frac{r - r_0}{r_0 \epsilon_c} \right)^8 .
-
-If the *normalize* keyword is set to *yes*, the bond force will be
-normalized by :math:`r_0` such that :math:`k_0` and :math:`k_j` must all be given in force units.
+The *smooth* keyword is accepted for consistency with related *poly*
+bond styles, but the current *poly/uFJC* implementation does not apply
+a separate smoothing factor in the main compute force path. The current
+code only applies smoothing in the bond single() path used for
+single-bond evaluation.
 
 By default, pair forces are not calculated between bonded particles.
-Pair forces can alternatively be overlaid on top of bond forces by setting
-the *overlay/pair* keyword to *yes*. These settings require specific
-:doc:`special_bonds <special_bonds>` settings described in the
-restrictions.  Further details can be found in the :doc:`how to <Howto_bpm>`
-page on BPMs.
+Pair forces can alternatively be overlaid on top of bond forces by
+setting the *overlay/pair* keyword to *yes*. These settings require
+specific :doc:`special_bonds <special_bonds>` settings as described in
+the restrictions.
 
-If the *break* keyword is set to *no*, LAMMPS assumes bonds should not break
-during a simulation run. This will prevent some unnecessary calculation.
-The recommended bond communication distance no longer depends on the value of
-:math:`\epsilon_c` (which is ignored) but instead corresponds to the typical
-heuristic maximum strain used by typical non-bpm bond styles. Similar behavior
-to *break no* can also be attained by setting an arbitrarily high value of
-:math:`\epsilon_c`. One cannot use *break no* with *smooth yes*.
-
-The *plastic* keyword toggles whether the elastic element is allowed to plastically
-deform as done by :doc:`bpm/spring/plastic <bond_bpm_spring_plastic>`. If set to *yes* the elastic
-force has a magnitude of
-
-.. math::
-   F_{el} = k_0 (r - r_{eq})
-
-where :math:`r_{eq}` is the equlibrium bond length.
-If the bond stretches beyond a strain of :math:`\epsilon_p` in compression or extension, 
-it will plastically activate and :math:`r_{eq}` will evolve to ensure :math:`|(r-r_{eq})/r_{eq}|`
-never exceeds :math:`r_{eq}`. Therefore, if a bond is continually loaded in either tension or compression, 
-the force in the elastic element will initially grow elastically before plateauing. Similar behaviour to 
-*plastic no* can be achieved by setting an arbitrarily high value of :math:`\epsilon_p`, or a higher value
-than :math:`\epsilon_c` if the *break yes* option is enabled.
-
-The *nonlinear* keyword toggles whether the force in the elastic element is nonlinear. The form
-of this is chosen such that the stiffness is :math:`k_{0}` for small applied strains, and diverges as
-bonds approach a critcal stretch :math:`\lambda_{c}`.
-If set to *yes* the elastic force has a magnitude of
-
-.. math::
-   F_{el} = k_0 (r - r_0)\left[ \frac{1}{1-\lambda^{2}} \right]
-
-where :math:`\lambda = (r - r_{0})/(r_{c}-r_{0})` is the stretch ratio with
-:math:`r_{0}` the reference bond length. The critical length :math:`r_{c}` in tension 
-is simply :math:`\lambda_c r_{0}`, meanwhile in compression :math:`r_{c}` = :math:`0`.
-If additionally, *plastic* = *yes* the reference state :math:`r_0`
-is replaced by the equlibrium state :math:`r_{eq}` as outlined above.
-
-The *temp/shift* keyword toggles whether the shift factor is used. This multiplicatively 
-adjusts the viscoelastic timescale as
-
-.. math::
-   \eta_m = a_T \eta^0_m
-
-where :math:`\eta_m^0` are the viscosities of the Maxwell elements as specified in 
-the tabulated file, and :math:`\eta_m` are the shifted viscosities used during a simulation.
-This can be used to essentially freeze relaxation of the internal stress during loading for
-instance. Alternatively, the shift factor :math:`a_T` is accessible by the
-:doc:`fix_adapt <fix_adapt>` command which allows :math:`a_T` to be modified continuously
-during a simulation.
+If the *break* keyword is set to *no*, LAMMPS assumes the bonds do not
+rupture during the run. This removes the break checks and also changes
+the recommended bond communication distance so that it no longer depends
+on the rupture criterion. As in the code, *smooth yes* cannot be used
+together with *break no*.
 
 The following coefficients must be defined for each bond type via the
-:doc:`bond_coeff <bond_coeff>` command as in the example above, or in
+:doc:`bond_coeff <bond_coeff>` command as in the examples above, or in
 the data file or restart files read by the :doc:`read_data
 <read_data>` or :doc:`read_restart <read_restart>` commands:
 
-* :math:`k_0`            (force/distance units)
-* :math:`\epsilon_c`     (unitless)
-* :math:`\gamma`         (force/velocity units)
+* :math:`k_0`        (energy or force-distance units)
+* :math:`\kappa`     (dimensionless segment extensibility parameter)
+* :math:`f_c`        (critical bond force for the default rupture criterion)
+* :math:`\gamma`     (force/velocity units)
 * filename
 * keyword
-* :math:`\epsilon_p`      (unitless)
-* :math:`\lambda_c`       (unitless)
-* :math:`a_T`             (unitless)
 
-The filename specifies a file containing the tablulated coefficients for the Maxwell 
-elements. The keyword specifies a section of the file. The format of this file is described below.
+An optional rupture criterion may be added after those required values:
 
-If the *store/local* keyword is used, an internal fix will track bonds that
-break during the simulation. Whenever a bond breaks, data is processed
-and transferred to an internal fix labeled *fix_ID*. This allows the
-local data to be accessed by other LAMMPS commands. Following this optional
-keyword, a list of one or more attributes is specified.  These include the
-IDs of the two atoms in the bond. The other attributes for the two atoms
-include the timestep during which the bond broke and the current/initial
-center of mass position of the two atoms.
+* *stretch* :math:`\lambda_c`
 
-Data is continuously accumulated over intervals of *N*
-timesteps. At the end of each interval, all of the saved accumulated
-data is deleted to make room for new data. Individual datum may
-therefore persist anywhere between *1* to *N* timesteps depending on
-when they are saved. This data can be accessed using the *fix_ID* and a
-:doc:`dump local <dump>` command. To ensure all data is output,
-the dump frequency should correspond to the same interval of *N*
-timesteps. A dump frequency of an integer multiple of *N* can be used
-to regularly output a sample of the accumulated data.
+If *stretch* is specified, :math:`f_c` is still read by the command but
+bond breaking is determined by :math:`\lambda_c` through the segmental
+stretch :math:`\lambda_v` instead of the force threshold.
 
-Note that when unbroken bonds are dumped to a file via the
-:doc:`dump local <dump>` command, bonds with type 0 (broken bonds)
-are not included.
-The :doc:`delete_bonds <delete_bonds>` command can also be used to
-query the status of broken bonds or permanently delete them, e.g.:
-
-.. code-block:: LAMMPS
-
-   delete_bonds all stats
-   delete_bonds all bond 0 remove
+The filename specifies a table containing the per-bond values of
+:math:`N` and :math:`b`. The keyword selects a named section in that
+file. Each entry is matched against a bonded atom pair by atom ID.
 
 ----------
 
 Formatting the table file
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-The format of a tabulated file is as follows (without parenthesized comments):
+""""""""""""""""""""""""""""""
+
+The table file assigns :math:`N` and :math:`b` to specific bonded atom
+pairs. Its format is as follows (without parenthesized comments):
 
 .. code-block:: LAMMPS
 
-   # Coefficients for Maxwell elements  (one or more comment or blank lines)
-   
-   MAXWELL                              (keyword is the first text on line)
-   n 5                                  (n Maxwell elements/entries)
-                                        (blank line)
-   1 1.0 0.1                            (index, stiffness, viscosity)
-   2 2.0 100
-   ...
-   5 0.5 1.0
+   # uFJC chain parameters for specific bonds
 
-The number of parameters *n* defined in the table file must be less than or 
-equal to the number of entries *N* allocated via the :doc:`bond_style <bond_style>` command.
-Therefore, if each bond type uses a unique tabulated file, *N* 
-should be allocated according to the file with the largest number of tabulated entries.
+   CHAINS                              (keyword is the first text on line)
+   N 3                                 (number of table entries)
+
+   1 10 11 40 0.50                     (index, atom I, atom J, N, b)
+   2 11 12 40 0.50
+   3 12 13 60 0.40
+
+The integer atom IDs on each line must match the IDs of a bonded atom
+pair. The order of the two IDs is irrelevant.
 
 ----------
 
 Restart and other info
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+""""""""""""""""""""""""""""""""
 
-This bond style writes the reference state of each bond to
-:doc:`binary restart files <restart>`. Loading a restart
-file will properly restore bonds. However, the reference state is NOT
-written to data files. Therefore reading a data file will not
-restore bonds and will cause their reference states to be redefined.
+This bond style writes its stored reference state, table data, and
+style settings to :doc:`binary restart files <restart>`. Loading a
+restart file will therefore restore the saved bond model. However, the
+reference state is not written to data files, so reading a data file
+reinitializes the bond state.
 
-If the *store/local* option is used, an internal fix will calculate
-a local vector or local array depending on the number of input values.
-The length of the vector or number of rows in the array is the number
-of recorded, broken bonds.  If a single input is specified, a local
-vector is produced. If two or more inputs are specified, a local array
-is produced where the number of columns = the number of inputs.  The
-vector or array can be accessed by any command that uses local values
-from a compute as input. See the :doc:`Howto output <Howto_output>` page
-for an overview of LAMMPS output options.
+The single() function returns 0.0 for the energy. It also provides four
+extra per-bond quantities through :doc:`compute bond/local
+<compute_bond_local>` as *b1* through *b4*. For this style they are:
 
-The vector or array will be floating point values that correspond to
-the specified attribute.
+* *b1* = stored :math:`N`
+* *b2* = stored :math:`b`
+* *b3* = current segmental stretch :math:`\lambda_v`
+* *b4* = current inverse-Langevin factor :math:`\xi`
 
-Any settings with the *store/local* option are not saved to a restart
-file and must be redefined.
+For example:
 
-The single() function of this bond style returns 0.0 for the energy of a 
-bonded interaction, since energy is not conserved in these dissipative potentials. 
-However, the single() function also calculates 4 additional quantities. The first 2 pertain 
-to bond lengths, including the reference state :math:`r_0` and equlibrium state :math:`r_{eq}`
-if the *plastic* option is utilized. If *plastic* = *no* then the equlibrium state 
-:math:`r_{eq}` will equal the reference state :math:`r_0`.
-The next 2 quantites (3-4) are the split elastic :math:`F_{el}`
-and viscoelastic :math:`H_d` forces respectively.
+.. code-block:: LAMMPS
 
-These extra quantity can be accessed by the
-:doc:`compute bond/local <compute_bond_local>` command as *b1*, *b2*, ..., *b4* \.
+   compute 2 all bond/local dist force b1 b2 b3 b4
+
+Here *dist* and *force* are the standard bond-local outputs, while the
+four *b* values are the extra quantities supplied by *poly/uFJC*.
+
+This bond style does not support dynamic bond creation after the bond
+state has been initialized.
 
 Restrictions
 """"""""""""
 
-This bond style is part of the BPM package.  It is only enabled if
-LAMMPS was built with that package.  See the :doc:`Build package
+This bond style is part of the POLY-NET package. It is only enabled if
+LAMMPS was built with that package. See the :doc:`Build package
 <Build_package>` page for more info.
 
-By default if pair interactions between bonded atoms are to be disabled,
-this bond style requires setting
+By default, if pair interactions between bonded atoms are to be
+disabled, this bond style requires setting
 
 .. code-block:: LAMMPS
 
    special_bonds lj 0 1 1 coul 1 1 1
 
-and :doc:`newton <newton>` must be set to bond off.  If the *overlay/pair*
-keyword is set to *yes*, this bond style alternatively requires setting
+and :doc:`newton <newton>` must be set to bond off. If the
+*overlay/pair* keyword is set to *yes*, this bond style instead
+requires
 
 .. code-block:: LAMMPS
 
    special_bonds lj/coul 1 1 1
 
+As with the other *poly* bond styles, breaking bonds is not compatible
+with simulations that also use angles, dihedrals, impropers, or atom
+style template.
+
+This bond style requires ghost atom velocities.
+
 Related commands
 """"""""""""""""
 
-:doc:`bond_coeff <bond_coeff>`, :doc:`bond bpm/spring <bond_bpm_spring>`, :doc:`bond bpm/spring/plastic <bond_bpm_spring_plastic>`
+:doc:`bond_coeff <bond_coeff>`, :doc:`compute bond/local <compute_bond_local>`,
+:doc:`bond poly/FJC <bond_poly_FJC>`, :doc:`bond poly/dFJC <bond_poly_dFJC>`
 
 Default
 """""""
 
-The option defaults are *overlay/pair* = *no*, *smooth* = *yes*, *normalize* = *no*, *break* = *yes*, *plastic* = *no*, *nonlinear* = *no*, and *temp/shift* = *no*
-
-----------
-
-.. _Kaliske1:
-
-**(Kaliske)** Kaliske and Rothert, Comput. Mech., 19, 228-239 (1997).
-
-.. _Groot4:
-
-**(Groot)** Groot and Warren, J Chem Phys, 107, 4423-35 (1997).
+The keyword defaults are *break* = *yes*, *overlay/pair* = *no*, and
+*smooth* = *yes*. If the optional *stretch* argument is not given in
+:doc:`bond_coeff <bond_coeff>`, rupture uses the default force-based
+criterion through :math:`f_c`.
