@@ -764,7 +764,7 @@ void BondPolyuFJC::read_table(Table *tb, char *file, char *keyword)
    N is required, other params are optional
 ------------------------------------------------------------------------- */
 
-void BondBPMuFJC::param_extract(Table *tb, char *line)
+void BondPolyuFJC::param_extract(Table *tb, char *line)
 {
   tb->ninput = 0;
   tb->r0 = 0.0;
@@ -791,7 +791,7 @@ void BondBPMuFJC::param_extract(Table *tb, char *line)
 
 /* ---------------------------------------------------------------------- */
 
-void BondBPMuFJC::bond_lookup(int type, int i, int j, double &N, double &b)
+void BondPolyuFJC::bond_lookup(int type, int i, int j, double &N, double &b)
 {
   int iatom, jatom;
   const Table *tb = &tables[tabindex[type]];
