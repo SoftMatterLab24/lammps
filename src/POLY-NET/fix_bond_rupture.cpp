@@ -701,12 +701,13 @@ void FixBondRupture::post_integrate()
       double r = sqrt(rsq);
       double bondforce = fabs(fbond)*r;
 
-      if (force->bond->single_extra < 4) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture prob/tilt");
+      if (force->bond->single_extra < 5) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture prob/tilt");
       
       N    = bond->svector[0];
       b    = bond->svector[1]; 
-      lamv = bond->svector[2];
-      xi   = bond->svector[3];
+      //y    = bond->svector[2];
+      lamv = bond->svector[3];
+      xi   = bond->svector[4];
 
       dU = barrier(xi, lamv, kappa, zeta);
 

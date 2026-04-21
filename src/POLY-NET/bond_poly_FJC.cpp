@@ -52,8 +52,8 @@ BondPolyFJC::BondPolyFJC(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_POLY_FJC");
 
-  single_extra = 2;
-  svector = new double[2];
+  single_extra = 3;
+  svector = new double[3];
 
   nmax = 0;
 
@@ -659,6 +659,7 @@ double BondPolyFJC::single(int type, double rsq, int i, int j, double &fforce)
 
   svector[0] = N;
   svector[1] = b;
+  svector[2] = lam;
   //svector[2] = fel;
   //svector[3] = fint;
   //svector[4] = Hn;

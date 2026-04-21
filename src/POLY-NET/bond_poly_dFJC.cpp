@@ -53,8 +53,8 @@ BondPolydFJC::BondPolydFJC(LAMMPS *_lmp) :
   update_flag = 1;
   id_fix_bond_history = utils::strdup("HISTORY_POLY_DFJC");
 
-  single_extra = 5;
-  svector = new double[5];
+  single_extra = 6;
+  svector = new double[6];
 
   nmax = 0;
 
@@ -702,9 +702,10 @@ double BondPolydFJC::single(int type, double rsq, int i, int j, double &fforce)
 
   svector[0] = N;
   svector[1] = b;
-  svector[2] = rs;        // segmental length
-  svector[3] = rj;        // entropic length  
-  svector[4] = aT[type];
+  svector[2] = rj;        // entropic length  ->normalize
+  svector[3] = rs;        // segmental length ->normalize
+  svector[4] = fn;        // previous bond force -> update to normalized bond force
+  svector[5] = aT[type];
 
   return 0.0;
 }
