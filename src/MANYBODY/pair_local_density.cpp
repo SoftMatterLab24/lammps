@@ -159,6 +159,7 @@ void PairLocalDensity::compute(int eflag, int vflag)
   double **x = atom->x;
   double **f = atom->f;
   int *type = atom->type;
+  tagint *molecule = atom->molecule;
   int nlocal = atom->nlocal;
   int newton_pair = force->newton_pair;
 
@@ -311,6 +312,8 @@ void PairLocalDensity::compute(int eflag, int vflag)
       j &= NEIGHMASK;
       jtype = type[j];
 
+      if (molecule[i] == molecule[j]) continue;
+
       // calculate square of distance between i,j atoms
 
       delx = xtmp - x[j][0];
@@ -428,6 +431,9 @@ void PairLocalDensity::coeff(int narg, char **arg)
 
 void PairLocalDensity::init_style()
 {
+  if (!atom->molecule_flag)
+    error->all(FLERR, "Pair style local/density requires atom attribute molecule");
+
   // spline rho and frho arrays
 
   array2spline();
@@ -460,7 +466,7 @@ double PairLocalDensity::init_one(int /* i */, int /* j */)
   of the LD potential without doing an actual MD run
  ---------------------------------------------------------------------------*/
 
-double PairLocalDensity::single(int /* i */, int /* j */, int itype, int jtype,
+double PairLocalDensity::single(int i, int j, int itype, int jtype,
                                 double rsq, double /* factor_coul */,
                                 double /* factor_lj */, double &fforce)
 {
@@ -468,6 +474,7 @@ double PairLocalDensity::single(int /* i */, int /* j */, int itype, int jtype,
     double rsqinv, p, uLD;
     double *coeff, **LD;
     double dFdrho, phi, dphi;
+    const int apply_force = (atom->molecule[i] != atom->molecule[j]);
 
     uLD = dFdrho = dphi = 0.0;
 
@@ -533,7 +540,8 @@ double PairLocalDensity::single(int /* i */, int /* j */, int itype, int jtype,
            dphi = rsq * (2.0*c2[k] + rsq * (4.0*c4[k] + 6.0*c6[k]*rsq));
           // dphi = -1.0;
         }
-        fforce +=  -(a[k][itype]*b[k][jtype]*dFdrho + a[k][jtype]*b[k][itype]*dFdrho) * dphi *rsqinv;
+        if (apply_force)
+          fforce +=  -(a[k][itype]*b[k][jtype]*dFdrho + a[k][jtype]*b[k][itype]*dFdrho) * dphi *rsqinv;
     }
     memory->destroy(LD);
 
