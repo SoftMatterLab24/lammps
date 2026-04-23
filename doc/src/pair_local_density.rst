@@ -22,6 +22,7 @@ Examples
 
    pair_style hybrid/overlay table spline 500 local/density
    pair_coeff * * local/density  benzene_water.localdensity.table
+   pair_coeff * * local/density  benzene_water.localdensity.table mol yes
 
 Description
 """""""""""
@@ -52,6 +53,12 @@ that will be read upon initialization.
    corresponding pair_coeff command and when used with other pair styles using the
    hybrid/overlay option, the corresponding pair_coeff command must be supplied
    \*  \* as placeholders for the atom types.
+
+   The :doc:`pair_coeff <pair_coeff>` command for this style also accepts the
+   optional keyword *mol* with a logical value. With *mol yes*, the local density
+   is still accumulated from all neighbors, but forces from the local/density
+   potential are only applied between atoms with different molecule IDs. This
+   requires atoms to have a molecule attribute. The default is *mol no*.
 
 ----------
 
