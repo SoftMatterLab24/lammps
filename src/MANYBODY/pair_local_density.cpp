@@ -29,6 +29,7 @@
 #include "neigh_list.h"
 #include "neighbor.h"
 #include "potential_file_reader.h"
+#include "utils.h"
 
 #include <cstring>
 
@@ -84,6 +85,7 @@ PairLocalDensity::PairLocalDensity(LAMMPS *lmp) : Pair(lmp)
   nmax = 0;
   fp = nullptr;
   localrho = nullptr;
+  inter_mol_flag = 0;
 
   // comm sizes needed by this pair style will be set when reading the potential file
   comm_forward = comm_reverse = 0;
@@ -159,7 +161,7 @@ void PairLocalDensity::compute(int eflag, int vflag)
   double **x = atom->x;
   double **f = atom->f;
   int *type = atom->type;
-  tagint *molecule = atom->molecule;
+  tagint *molecule = inter_mol_flag ? atom->molecule : nullptr;
   int nlocal = atom->nlocal;
   int newton_pair = force->newton_pair;
 
@@ -312,7 +314,7 @@ void PairLocalDensity::compute(int eflag, int vflag)
       j &= NEIGHMASK;
       jtype = type[j];
 
-      if (molecule[i] == molecule[j]) continue;
+      if (inter_mol_flag && molecule[i] == molecule[j]) continue;
 
       // calculate square of distance between i,j atoms
 
@@ -395,12 +397,19 @@ void PairLocalDensity::coeff(int narg, char **arg)
   int i, j;
   if (!allocated) allocate();
 
-  if (narg != 3) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (narg != 3 && narg != 5) error->all(FLERR,"Incorrect args for pair coefficients");
 
   // ensure I,J args are * *
 
   if (strcmp(arg[0],"*") != 0 || strcmp(arg[1],"*") != 0)
     error->all(FLERR,"Incorrect args for pair coefficients");
+
+  inter_mol_flag = 0;
+  if (narg == 5) {
+    if (strcmp(arg[3], "mol") != 0)
+      error->all(FLERR, "Unknown pair_coeff option for pair_style local/density");
+    inter_mol_flag = utils::logical(FLERR, arg[4], false, lmp);
+  }
 
   // parse LD file
 
@@ -431,7 +440,7 @@ void PairLocalDensity::coeff(int narg, char **arg)
 
 void PairLocalDensity::init_style()
 {
-  if (!atom->molecule_flag)
+  if (inter_mol_flag && !atom->molecule_flag)
     error->all(FLERR, "Pair style local/density requires atom attribute molecule");
 
   // spline rho and frho arrays
@@ -474,9 +483,10 @@ double PairLocalDensity::single(int i, int j, int itype, int jtype,
     double rsqinv, p, uLD;
     double *coeff, **LD;
     double dFdrho, phi, dphi;
-    const int apply_force = (atom->molecule[i] != atom->molecule[j]);
+  const int apply_force = !inter_mol_flag || (atom->molecule[i] != atom->molecule[j]);
 
     uLD = dFdrho = dphi = 0.0;
+    fforce = 0.0;
 
     memory->create(LD, nLD, 3, "pairLD:LD");
     for (k = 0; k < nLD; k++) {
