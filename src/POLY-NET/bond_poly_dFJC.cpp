@@ -535,9 +535,6 @@ void BondPolydFJC::read_restart(FILE *fp)
     utils::sfread(FLERR, &zeta[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &gamma[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &aT[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
-    utils::sfread(FLERR, &aT_temp[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
     utils::sfread(FLERR, &lamc[1], sizeof(double), atom->nbondtypes, fp, nullptr, error);
 
     utils::sfread(FLERR, &tabstyle, sizeof(int), 1, fp, nullptr, error);
@@ -564,17 +561,6 @@ void BondPolydFJC::read_restart(FILE *fp)
   // allocate tables array on all procs
   tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
 
-  // Read tables written by write_restart
-  if (comm->me == 0) {
-    utils::sfread(FLERR, &ntables, sizeof(int), 1, fp, nullptr, error);
-  }
-  MPI_Bcast(&ntables, 1, MPI_INT, 0, world);
-
-  // allocate tables array on all procs
-  if (ntables > 0) {
-    tables = (Table *) memory->srealloc(tables, ntables * sizeof(Table), "bond:tables");
-  }
-
   for (int t = 0; t < ntables; t++) {
     Table *tb = &tables[t];
     null_table(tb);
@@ -586,6 +572,9 @@ void BondPolydFJC::read_restart(FILE *fp)
     if (comm->me == 0) {
       utils::sfread(FLERR, &ninput_local, sizeof(int), 1, fp, nullptr, error);
       utils::sfread(FLERR, &r0_local, sizeof(double), 1, fp, nullptr, error);
+
+      tb->ninput = ninput_local;
+      tb->r0 = r0_local;
 
       tb->iatomfile = nullptr; tb->jatomfile = nullptr; tb->Nfile = nullptr; tb->bfile = nullptr;
       memory->create(tb->iatomfile, tb->ninput, "bond:iatomfile");
