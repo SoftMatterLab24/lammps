@@ -42,7 +42,7 @@ class PairPOLYSpring : public Pair {
   double single(int, int, int, int, double, double, double, double &) override;
 
  protected:
-  int anharmonic_flag;
+  int anharmonic_flag, inter_mol_flag;
   double **k, **ka, **cut, **gamma;
 
   void allocate();

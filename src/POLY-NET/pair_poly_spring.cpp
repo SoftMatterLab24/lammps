@@ -36,6 +36,7 @@ PairPOLYSpring::PairPOLYSpring(LAMMPS *_lmp) : Pair(_lmp), k(nullptr), ka(nullpt
 {
   writedata = 1;
   anharmonic_flag = 0;
+  inter_mol_flag = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -73,6 +74,7 @@ void PairPOLYSpring::compute(int eflag, int vflag)
   double **v = atom->v;
   double **f = atom->f;
   int *type = atom->type;
+  tagint *molecule = inter_mol_flag ? atom->molecule : nullptr;
   int nlocal = atom->nlocal;
   int newton_pair = force->newton_pair;
   double *special_lj = force->special_lj;
@@ -103,12 +105,15 @@ void PairPOLYSpring::compute(int eflag, int vflag)
       if (factor_lj == 0) continue;
 
       j &= NEIGHMASK;
+      jtype = type[j];
+
+      if (inter_mol_flag && molecule[i] == molecule[j]) continue;
 
       delx = xtmp - x[j][0];
       dely = ytmp - x[j][1];
       delz = ztmp - x[j][2];
       rsq = delx * delx + dely * dely + delz * delz;
-      jtype = type[j];
+      
 
       if (rsq < cutsq[itype][jtype]) {
         r = sqrt(rsq);
@@ -199,11 +204,13 @@ void PairPOLYSpring::settings(int narg, char ** arg)
 
 void PairPOLYSpring::coeff(int narg, char **arg)
 {
-  if ((!anharmonic_flag && narg != 5) || (anharmonic_flag && narg != 6))
+  if ((!anharmonic_flag && (narg != 5 || narg !=7)) || (anharmonic_flag && (narg != 6 || narg != 8)))
     error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo, ihi, jlo, jhi;
+  
+
   utils::bounds(FLERR, arg[0], 1, atom->ntypes, ilo, ihi, error);
   utils::bounds(FLERR, arg[1], 1, atom->ntypes, jlo, jhi, error);
 
@@ -212,8 +219,22 @@ void PairPOLYSpring::coeff(int narg, char **arg)
   double gamma_one = utils::numeric(FLERR, arg[4], false, lmp);
 
   double ka_one = 0.0;
-  if (anharmonic_flag)
+  inter_mol_flag = 0;
+  if (anharmonic_flag && narg == 6) {
     ka_one = utils::numeric(FLERR, arg[5], false, lmp);
+  }
+  if (anharmonic_flag && narg == 8) {
+    ka_one = utils::numeric(FLERR, arg[5], false, lmp);
+    if (strcmp(arg[6], "mol") != 0)
+      error->all(FLERR, "Unknown pair_coeff option for pair_style poly/spring");
+    inter_mol_flag = utils::logical(FLERR, arg[7], false, lmp);
+  }
+
+  if (!anharmonic_flag && narg == 7) {
+    if (strcmp(arg[5], "mol") != 0)
+      error->all(FLERR, "Unknown pair_coeff option for pair_style poly/spring");
+    inter_mol_flag = utils::logical(FLERR, arg[6], false, lmp);
+  }
 
   if (cut_one <= 0.0) error->all(FLERR, "Incorrect args for pair coefficients" + utils::errorurl(21));
 
@@ -376,6 +397,9 @@ double PairPOLYSpring::single(int i, int j, int itype, int jtype, double rsq, do
 {
   double fpair, r, rinv, dr;
   double delx, dely, delz, delvx, delvy, delvz, dot, smooth;
+  const int apply_force = !inter_mol_flag || (atom->molecule[i] != atom->molecule[j]);
+
+  fforce = 0.0;
 
   if (rsq > cutsq[itype][jtype]) return 0.0;
 
@@ -409,7 +433,9 @@ double PairPOLYSpring::single(int i, int j, int itype, int jtype, double rsq, do
 
   fpair *= factor_lj;
   energy *= factor_lj;
-  fforce = fpair;
+
+  if (apply_force) fforce += fpair;
+  
 
   return energy;
 }

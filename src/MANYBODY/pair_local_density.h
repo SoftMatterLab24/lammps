@@ -62,7 +62,7 @@ class PairLocalDensity : public Pair {
   double ***frho_spline;    // splined LD potentials
   double cutmax;            // max cutoff for all elements
   double cutforcesq;        // square of global upper cutoff
-   int inter_mol_flag;       // only apply forces between different molecule IDs
+  int inter_mol_flag;       // only apply forces between different molecule IDs
 
   int nmax;             // max size of per-atom arrays
   double **localrho;    // per-atom LD
