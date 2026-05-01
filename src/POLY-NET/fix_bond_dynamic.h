@@ -56,7 +56,7 @@ class FixBondDynamic : public Fix {
   int maxbond;
 
   // Flags for keywords
-  int flag_bell, flag_catch, flag_ellis,flag_dangle, flag_prob, flag_rouse, flag_critical, flag_mol;
+  int flag_bell, flag_catch, flag_ellis, flag_dangle, flag_tilt, flag_prob, flag_rouse, flag_critical, flag_mol;
 
   // Explicit probabilities for flag_prob
   double prob_attach, prob_detach;
@@ -70,6 +70,9 @@ class FixBondDynamic : public Fix {
   // Parameters for flag_ellis or flag_dangle
   double kd_max, fbond_y, rbond_y, alph;
 
+  // Parameters for flag_tilt
+  double zeta, kappa, omega, dt_eq;
+  
   // Lengthscale for flag_rouse
   double b2;
 
@@ -115,6 +118,7 @@ class FixBondDynamic : public Fix {
   void process_broken(int, int);
   void process_created(int, int);
   void update_topology();
+  double barrier(double, double, double, double);
 
   // Create an array to store bonds broken this timestep (new)
   // and since the last neighbor list build

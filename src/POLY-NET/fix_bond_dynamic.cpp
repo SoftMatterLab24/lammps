@@ -152,6 +152,14 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
       alph = utils::numeric(FLERR,arg[iarg+3],false,lmp);
       flag_dangle = 1;
       iarg += 4;
+    } else if (strcmp(arg[iarg],"tilt") == 0) {
+      if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
+      zeta = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+      kappa = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+      omega = utils::numeric(FLERR,arg[iarg+3],false,lmp);
+      dt_eq = utils::numeric(FLERR,arg[iarg+4],false,lmp);
+      flag_tilt = 1;
+      iarg += 4;
     } else if (strcmp(arg[iarg],"rouse") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
       double b0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
@@ -177,7 +185,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   }
 
   // error checks
-  // prob cannot be used with bell, catch, ellis, or dangle
+  // prob cannot be used with bell, catch, ellis, dangle, or tilt
   if (flag_prob && flag_bell)
     error->all(FLERR,"Cannot use argument prob with argument bell");
   if (flag_prob && flag_catch)
@@ -186,20 +194,37 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
     error->all(FLERR,"Cannot use argument prob with argument ellis");
   if (flag_prob && flag_dangle)
     error->all(FLERR,"Cannot use argument prob with argument dangle");
+  if (flag_prob && flag_tilt)
+    error->all(FLERR,"Cannot use argument prob with argument tilt");
+
   
-  // bell cannot be used with catch, ellis, or dangle
+  // bell cannot be used with catch, ellis, dangle, or tilt
   if (flag_bell && flag_catch)
     error->all(FLERR,"Cannot use argument bell with argument catch");
   if (flag_bell && flag_ellis)
     error->all(FLERR,"Cannot use argument bell with argument ellis");
   if (flag_bell && flag_dangle)
     error->all(FLERR,"Cannot use argument bell with argument dangle");
+  if (flag_bell && flag_tilt)
+    error->all(FLERR,"Cannot use argument bell with argument tilt");
 
-  // ellis cannot be used with catch or dangle
+  // ellis cannot be used with catch, dangle, or tilt
   if (flag_ellis && flag_catch)
     error->all(FLERR,"Cannot use argument ellis with argument catch");
   if (flag_ellis && flag_dangle)
     error->all(FLERR,"Cannot use argument ellis with argument dangle");
+  if (flag_ellis && flag_tilt)
+    error->all(FLERR,"Cannot use argument ellis with argument tilt");
+
+  // catch cannot be used with dangle or tilt
+  if (flag_catch && flag_dangle)
+    error->all(FLERR,"Cannot use argument catch with argument dangle");
+  if (flag_catch && flag_tilt)
+    error->all(FLERR,"Cannot use argument catch with argument tilt"); 
+
+  // dangle cannot be used with tilt
+  if (flag_dangle && flag_tilt)
+    error->all(FLERR,"Cannot use argument dangle with argument tilt");
 
   if (atom->molecular != Atom::MOLECULAR)
     error->all(FLERR,"Cannot use fix bond/dynamic with non-molecular systems");
@@ -549,6 +574,32 @@ void FixBondDynamic::post_integrate()
         double denom = 1 + exp(-alph*(r-rbond_y));
         double kd_dangle = kd + numer / denom;
         p_detach = 1 - exp(-kd_dangle*DT_EQ);
+      }
+      if (flag_tilt) {
+        // Find distance between two atoms
+        double delx = x[i][0] - x[j][0];
+        double dely = x[i][1] - x[j][1];
+        double delz = x[i][2] - x[j][2];
+        domain->minimum_image(FLERR,delx, dely, delz);
+        double rsq = delx*delx + dely*dely + delz*delz;
+
+        // Find force in bond
+        double fbond; // fbond is returned as f/r
+        double engpot = bond->single(btype,rsq,i,j,fbond);
+        double r = sqrt(rsq);
+        double bondforce = fabs(fbond)*r;
+
+        if (force->bond->single_extra < 5) error->all(FLERR, "Bond style does not have extra field requested by fix bond/rupture prob/tilt");
+      
+        double lamv = bond->svector[3];
+        double xi   = bond->svector[4];
+
+        double dU = barrier(xi, lamv, kappa, zeta);
+
+        double p_rup = exp(-dU*zeta); // probability of dettach based on barrier height
+        double kr = omega*p_rup;           // rate of dettach based on barrier and attempt frequency
+
+        p_detach = 1.0 - exp(-kr*dt_eq);
       }
       if (flag_critical) {
 
@@ -1502,5 +1553,46 @@ double FixBondDynamic::compute_vector(int n)
 
   return N_all[n];
 
+}
+
+/* ----------------------------------------------------------------------
+    Compute barrier height of tilted composite potential energy landscape
+  ------------------------------------------------------------------------- */
+
+double FixBondDynamic::barrier(double fbond, double lamv, double kappa, double zeta)
+{
+  double lamv_crit, lamv_localmin, lamv_localmax;
+  double term1;
+  double f, umin, umax;
+
+  // Compute critical stretch
+  lamv_crit = 1 + pow(zeta / kappa , 0.5);
+
+  if (lamv >= lamv_crit) return 0;
+
+  f = fabs(fbond);
+  
+  lamv_localmin = 1 + f / kappa;
+  term1 = (pow(zeta,2.0) * (1 / f) / kappa ) ;
+  lamv_localmax = 1 + pow(term1, 1.0/3.0);
+
+  
+  // PE of local minima
+  if (lamv_localmin < lamv_crit) {
+    umin = (0.5 * kappa / zeta * pow((lamv_localmin - 1), 2.0)) - (f * lamv_localmin / zeta);
+  } else {
+    umin = (1 - zeta / (2 * kappa * pow((lamv_localmin - 1), 2.0))) - (f * lamv_localmin / zeta);
+  }
+
+  // PE of local maxima
+  if (lamv_localmax < lamv_crit) {
+    umax = (0.5 * kappa / zeta * pow((lamv_localmax - 1), 2.0)) - (f * lamv_localmax / zeta);
+  } else {
+    umax = (1 - zeta / (2 * kappa * pow((lamv_localmax - 1), 2.0))) - (f * lamv_localmax / zeta);
+  }
+
+  // if local max is above 1e20
+  //printf("lamv %f, lamv_crit %f, lamv_localmin %f, lamv_localmax %f bondforce %f, umin %f, umax %f \n", lamv, lamv_crit, lamv_localmin, lamv_localmax, fbond, umin, umax);
+  return umax - umin;
 }
  
