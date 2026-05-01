@@ -105,6 +105,7 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
   flag_catch = 0;
   flag_ellis = 0;
   flag_dangle = 0;
+  flag_tilt = 0;
   flag_rouse = 0;
   flag_critical = 0;
   flag_mol = 0;
@@ -153,13 +154,13 @@ FixBondDynamic::FixBondDynamic(LAMMPS *lmp, int narg, char **arg) :
       flag_dangle = 1;
       iarg += 4;
     } else if (strcmp(arg[iarg],"tilt") == 0) {
-      if (iarg+4 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
+      if (iarg+5 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
       zeta = utils::numeric(FLERR,arg[iarg+1],false,lmp);
       kappa = utils::numeric(FLERR,arg[iarg+2],false,lmp);
       omega = utils::numeric(FLERR,arg[iarg+3],false,lmp);
       dt_eq = utils::numeric(FLERR,arg[iarg+4],false,lmp);
       flag_tilt = 1;
-      iarg += 4;
+      iarg += 5;
     } else if (strcmp(arg[iarg],"rouse") == 0) {
       if (iarg+2 > narg) error->all(FLERR,"Illegal fix bond/dynamic command");
       double b0 = utils::numeric(FLERR,arg[iarg+1],false,lmp);
@@ -808,6 +809,9 @@ void FixBondDynamic::post_integrate()
       if (flag_rouse) {
         double ka_rouse = ka*pow(b2/rsq,2);
         p_attach = 1 - exp(-ka_rouse*DT_EQ);
+      }
+      if (flag_tilt) {
+        p_attach = 1 - exp(-ka*dt_eq);
       }
       if (flag_prob) {
         // Set attachment probability directly

@@ -253,7 +253,7 @@ void BondPolyuFJC::compute(int eflag, int vflag)
     // If bond hasn't been set - should be initialized to zero - (e.g. pour, fix bond/dynamic)
     if (r0 < EPSILON || std::isnan(r0)) {
       error->one(FLERR, "This bond style does not support dynamic bond creation");
-      r0 =store_bond(n, i1, i2);
+      r0 = store_bond(n, i1, i2);
     }
 
     delx = x[i1][0] - x[i2][0];
