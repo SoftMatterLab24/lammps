@@ -135,7 +135,7 @@ be used with *bond/distribution* keyword
 
 The *bond/distribution* keyword allows a unique rupture criterion to be
 defined on a per bond basis, by drawing certain style arguments
-from a defined distribution type. To distribute and argument, the
+from a defined distribution type. To distribute an argument, the
 argument is specified followed by the parameters that define the
 distribution. For example, with distribution *Gauss* and rupture 
 style *dist* each bond will have a value *rcrit* drawn from a normal
