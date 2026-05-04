@@ -34,6 +34,9 @@ Examples
    bond_style poly/uFJC break yes overlay/pair yes smooth no
    bond_coeff 1 1.0 100.0 10.0 0.1 bond.table CHAINS stretch 1.05
 
+   bond_style poly/uFJC break yes overlay/pair yes smooth no
+   bond_coeff 1 1.0 100.0 10.0 0.1 bond.table CHAINS bond/distribution 1.6 exponential 30 27 35
+
    compute 2 all bond/local dist force b1 b2 b3 b4
 
 Description
@@ -144,13 +147,54 @@ the data file or restart files read by the :doc:`read_data
 * filename
 * keyword
 
-An optional rupture criterion may be added after those required values:
+Zero or more additional settings/keywords may be appended after those required values:
 
-* *stretch* :math:`\lambda_c`
+* keyword = *stretch* or *bond/distribution* or *seed*
 
-If *stretch* is specified, :math:`f_c` is still read by the command but
-bond breaking is determined by :math:`\lambda_c` through the segmental
-stretch :math:`\lambda_v` instead of the force threshold.
+  .. parsed-literal::
+
+      *stretch* values = lambda_c
+            lambda_c = enforce bonds with stretch greater than lambda_c rupture
+      *bond/distribution* values = b dist_type params
+         b =  Kuhn segment length
+         dist_type = *uniform* or *gauss* or *exponential* or *weibull*
+            uniform params = lo hi
+               lo = lower bound value of style_arg
+               hi = upper bound value of style_arg
+            gauss params =  mu sigma
+               mu = average value of style_arg
+               sigma = standard deviation of style_arg
+            exponential params = lambda
+               lambda = mean of style_arg
+               l_min = lower bound value of style_arg
+               l_max = upper bound value of style_arg
+            weibull params = alpha beta
+               alpha = scale factor of style_arg
+               beta = shape factor of style_arg
+      *seed* value = 
+            seed = random number seed (positive integer)
+
+
+If *stretch* is specified, bond breaking is determined by 
+:math:`\lambda_c` through the segmental stretch :math:`\lambda_v` 
+instead of the force threshold.
+
+If *bond/distribution* keyword is specified newly created bonds
+state variable :math:`N` is assigned by drawing the value from a 
+defined distribution type. The state variable :math:`b` is currently not 
+supported and is instead set as a fixed value. Note that this setting 
+is required if bonds are added dynamically during a simulation run
+as achieved by :doc:`fix bond/create <fix_bond_dynamic>` and
+:doc:`fix bond/create <fix_bond_create>` for example. To distribute 
+:math:`N`, the distribution type is specified followed by the 
+parameters that define the distribution. For example, 
+with distribution *Gauss* each new bond will have a value :math:`N` 
+drawn from a normal distribution with mean 
+:math:`\mu` and standard deviation :math:`\sigma`.
+
+The *seed* keyword  can be used to specifiy the processor-unique seed 
+used to initialized the Marsaglia random number generator. By default 
+the seed is 12345. The value setting must be a positive integer.
 
 The filename specifies a table containing the per-bond values of
 :math:`N` and :math:`b`. The keyword selects a named section in that
