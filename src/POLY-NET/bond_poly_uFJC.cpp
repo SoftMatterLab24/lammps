@@ -44,9 +44,13 @@ BondPolyuFJC::BondPolyuFJC(LAMMPS *_lmp) :
   stretch_flag = 0;
   normalize_flag = 0;
   writedata = 0;
+  flag_distribution = 0;
 
   ntables = 0;
   tables = nullptr;
+
+  // Default settings
+  seed = 12345;
 
   nhistory = 3;
   update_flag = 1;
@@ -92,13 +96,18 @@ BondPolyuFJC::~BondPolyuFJC()
 double BondPolyuFJC::store_bond(int n, int i, int j)
 {
   int type;
+  int ia, ja;
   double delx, dely, delz, r;
+  double N, b;
   double **x = atom->x;
   double dt = update->dt;
   double **bondstore = fix_bond_history->bondstore;
   tagint *tag = atom->tag;
+  tagint itag, jtag;
 
   int **bond_type = atom->bond_type;
+  long int natoms = atom->natoms;
+  long int key;
 
   delx = x[i][0] - x[j][0];
   dely = x[i][1] - x[j][1];
@@ -106,12 +115,24 @@ double BondPolyuFJC::store_bond(int n, int i, int j)
 
   r = sqrt(delx * delx + dely * dely + delz * delz);
 
+  // Pull from distribution
+  ia = atom->tag[i];
+  ja = atom->tag[j];
+  key = std::min(ia,ja)*natoms + std::max(ia,ja);
+  
+  N = sample_cdf(key, 0);
+  b = b_dist;
+
   bondstore[n][0] = r;
+  bondstore[n][1] = N;
+  bondstore[n][2] = b;
 
   if (i < atom->nlocal) {
     for (int m = 0; m < atom->num_bond[i]; m++) {
       if (atom->bond_atom[i][m] == tag[j]) { 
         fix_bond_history->update_atom_value(i, m, 0, r); // r0
+        fix_bond_history->update_atom_value(i, m, 1, N); // N
+        fix_bond_history->update_atom_value(i, m, 2, b); // b
       }
     }
   }
@@ -120,6 +141,8 @@ double BondPolyuFJC::store_bond(int n, int i, int j)
     for (int m = 0; m < atom->num_bond[j]; m++) {
       if (atom->bond_atom[j][m] == tag[i]) { 
         fix_bond_history->update_atom_value(j, m, 0, r); //r0
+        fix_bond_history->update_atom_value(j, m, 1, N); //N
+        fix_bond_history->update_atom_value(j, m, 2, b); //
       }
     }
   }
@@ -158,8 +181,6 @@ void BondPolyuFJC::store_data()
       if (j == -1) error->one(FLERR, "Atom missing in BPM bond");
 
       bond_lookup(type, atom->tag[i], atom->tag[j], N, b); // lookup N and b from tables
-      
-      //printf("Storing bond i: %d j: %d type: %d N: %f b: %f\n", atom->tag[i], atom->tag[j], type, N, b);
 
       delx = x[i][0] - x[j][0];
       dely = x[i][1] - x[j][1];
@@ -224,7 +245,6 @@ void BondPolyuFJC::compute(int eflag, int vflag)
 
   for (n = 0; n < nbondlist; n++) {
 
-    //printf("Processing bond %d of %d\n", n+1, nbondlist);
     // skip bond if already broken
     if (bondlist[n][2] <= 0) {
       continue;
@@ -237,10 +257,6 @@ void BondPolyuFJC::compute(int eflag, int vflag)
 
     const Table *tb = &tables[tabindex[type]];
     
-    if (n == 200) {
-      //printf("In compute: Bond %d bondstore 0 is %f\n", n, bondstore[n][0]);
-    }
-    
     // Ensure pair is always ordered to ensure numerical operations
     // are identical to minimize the possibility that a bond straddling
     // an mpi grid (newton off) doesn't break on one proc but not the other 
@@ -252,8 +268,12 @@ void BondPolyuFJC::compute(int eflag, int vflag)
 
     // If bond hasn't been set - should be initialized to zero - (e.g. pour, fix bond/dynamic)
     if (r0 < EPSILON || std::isnan(r0)) {
-      error->one(FLERR, "This bond style does not support dynamic bond creation");
+      
+      if (!flag_distribution) error->one(FLERR, "bond/distribution false for dynamic bond creation");
       r0 = store_bond(n, i1, i2);
+
+      N = bondstore[n][1];
+      b = bondstore[n][2];
     }
 
     delx = x[i1][0] - x[i2][0];
@@ -283,8 +303,6 @@ void BondPolyuFJC::compute(int eflag, int vflag)
       process_broken(i1, i2);
       continue;
     }
-
-    //printf("Lamv %f\n",'')
 
     // Calculate bond force
     y = lam - lamv + 1;
@@ -375,14 +393,61 @@ void BondPolyuFJC::coeff(int narg, char **arg)
   // Parse any leftover args
 
   double lamc_one = 0.95; // default
+  b_dist = 1;
+
   int iarg = 7;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "stretch") == 0) {
-      if (iarg+1 > narg) error->all(FLERR, "Illegal bond bpm command, incorrect args for bond coefficients");
+      if (iarg+1 > narg) error->all(FLERR, "Illegal bond poly command, incorrect args for bond coefficients");
       lamc_one = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
-      if (lamc_one <= 0.0) error->all(FLERR, "Illegal bond bpm command, stretch criterion must be 0 < lamc");
+      if (lamc_one <= 0.0) error->all(FLERR, "Illegal bond poly command, stretch criterion must be 0 < lamc");
       stretch_flag = 1;
       iarg += 2;
+    } else if (strcmp(arg[iarg], "seed" ) == 0) {
+      if (iarg+1 > narg) error->all(FLERR, "Illegal bond poly command, incorrect args for bond coefficients");
+      seed = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      iarg += 2;
+    } else if (strcmp(arg[iarg],"bond/distribution") == 0) {
+      if (iarg+2 > narg) error->all(FLERR,"Illegal bond poly command");
+      flag_distribution = 1;
+
+      b_dist = utils::numeric(FLERR,arg[iarg+1], false, lmp);
+      if (b_dist <= 0.0) error->all(FLERR,"Illegal bond/distribution b parameter");
+      dist_type = utils::strdup(arg[iarg+2]);
+      iarg += 2;
+
+      // Parse distribution parameters
+      if (strcmp(dist_type,"uniform") == 0 ) {
+        if (iarg + 3 > narg) error->all(FLERR,"Not enough arguments for bond/distribution parameter block");
+        
+        lo = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        hi = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+        if (hi <= lo) error->all(FLERR,"Illegal uniform distribution bounds");
+        iarg += 3;
+      } else if (strcmp(dist_type,"gauss") == 0) {
+        if (iarg + 3 > narg) error->all(FLERR,"Not enough arguments for bond/distribution parameter block");
+
+        mu    = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        sigma = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+        if (sigma <= 0.0) error->all(FLERR,"Illegal gauss sigma");
+        iarg += 3;
+      } else if (strcmp(dist_type,"exponential") == 0) {
+        if (iarg + 4 > narg) error->all(FLERR,"Not enough arguments for bond/distribution parameter block");
+
+        lambda = utils::numeric(FLERR,arg[iarg+1],false,lmp);
+        l_min = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+        l_max = utils::numeric(FLERR,arg[iarg+3],false,lmp);
+        if (l_max < l_min) error->all(FLERR,"Illegal exponential distribution bounds");
+        if (lambda <= 0.0) error->all(FLERR,"Illegal exponential lambda");
+        iarg += 4;
+      } else if (strcmp(dist_type,"weibull") == 0) {
+        if (iarg + 3 > narg) error->all(FLERR,"Not enough arguments for bond/distribution parameter block");
+
+        alpha = utils::numeric(FLERR,arg[iarg+1],false,lmp); // shape or scale—your convention
+        beta  = utils::numeric(FLERR,arg[iarg+2],false,lmp);
+        if (alpha <= 0.0 || beta <= 0.0) error->all(FLERR,"Illegal weibull params");
+        iarg += 3;
+      } else error->all(FLERR,"Illegal bond/distribution type");
     } else error->all(FLERR,"Incorrect args for bond coefficients");
   }
 
@@ -638,8 +703,6 @@ double BondPolyuFJC::single(int type, double rsq, int i, int j, double &fforce)
   fforce = -k0[type]*numer/denom/b;
   xi = numer/denom;
 
-  //if (lamv > 1.2 && n==320) printf(" %d Chain stretch %f, Seg stretch %f, Bondforce %f, y %f, kappa %f \n",n,lam,lamv,xi,y,kappa[type]);
-
   double **x = atom->x;
   double **v = atom->v;
   double delx = x[i][0] - x[j][0];
@@ -748,7 +811,6 @@ void BondPolyuFJC::read_table(Table *tb, char *file, char *keyword)
       tb->jatomfile[i] = values.next_int();
       tb->Nfile[i] = values.next_double(); 
       tb->bfile[i] = values.next_double();
-      //printf("reading | i: %i, N: %f, b: %f\n", i,tb->Nfile[i], tb->bfile[i]);
     } catch (TokenizerException &e) {
       error->one(FLERR, "Error parsing bond table '{}' line {} of {}. {}\nLine was: {}", keyword,
                  i + 1, tb->ninput, e.what(), line);
@@ -777,7 +839,6 @@ void BondPolyuFJC::param_extract(Table *tb, char *line)
 
       if (word == "N") {
         tb->ninput = values.next_int();
-        //printf("Num Bonds to Read: %i\n", tb->ninput);
       } else {
         error->one(FLERR, "Unknown keyword {} in bond table parameters", word);
       }
@@ -833,4 +894,126 @@ void BondPolyuFJC::bcast_table(Table *tb) // *UPDATED
   MPI_Bcast(tb->bfile, tb->ninput, MPI_DOUBLE, 0, world);
 }
 
-/* ---------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------
+   return a number sampled from the cdf given a unique (i,j) pair key
+------------------------------------------------------------------------- */
+
+double BondPolyuFJC::sample_cdf(long int key, int l) 
+{   
+  // Draw two random uniform numbers
+  double u1 = bond_uniform(key,l);
+  double u2 = bond_uniform(key,l+1);
+
+  int N_default = 1;
+
+  // attempts to draw valid random number otherwise default to mean or midpoint of distribution
+  for (int attempt = 0; attempt < 1000; ++attempt) {
+    double x = 0.0;
+
+    if (strcmp(dist_type,"uniform") == 0 ) {
+      x = lo + u1 * (hi - lo);
+      N_default = static_cast<int>(std::round((lo + hi) / 2.0));
+    } else if (strcmp(dist_type,"gauss") == 0) {
+
+      if (u1 < 1.0e-12) u1 = 1.0e-12;
+
+      double z0 = sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
+      x  = mu + sigma * z0;
+      N_default = static_cast<int>(std::round(mu));
+
+    } else if (strcmp(dist_type,"exponential") == 0) {
+      if (l_max == l_min && l_max == lambda) {
+        x = lambda;
+      } else {
+        double a = l_min;
+        double b = l_max;
+        double lam = lambda;
+        double D = 1.0 - exp(-(b - a) / lam);
+        x = a - lam * log(1.0 - u1 * D);
+      }
+      N_default = static_cast<int>(std::round(lambda));
+    } else if (strcmp(dist_type,"weibull") == 0) {
+      x = alpha * pow(-log(1-u1), 1.0/beta);
+      N_default = static_cast<int>(std::round(alpha * pow(-log(0.5), 1.0/beta)));
+    } else {
+      error->all(FLERR,"Illegal distribution type in fix bond/rupture");
+    }
+
+    // Accept only finite, non-negative integers
+    int N = static_cast<int>(std::round(x));
+    if (std::isfinite(N) && N > 0) return N;
+  }
+
+  //error->all(FLERR,"Failed to sample valid bond parameter");
+  return N_default; 
+}
+
+/* ----------------------------------------------------------------------
+    Psuedo-random uniform number generator given pair key, index, and global seed
+  ------------------------------------------------------------------------- */
+
+double BondPolyuFJC::bond_uniform(long int key, int l)
+{
+  // 32-bit seed from key and l
+  uint32_t x = static_cast<uint32_t>(key);
+  uint32_t y = static_cast<uint32_t>(l);
+
+  x ^= static_cast<uint32_t>(seed) * 0x9E3779B9u;
+
+  // Mix key and l (avalanche hash)
+  x = x ^ (y * 0x9E3779B9u);
+  x = x ^ (x >> 16);
+  x = x * 0x7FEB352Du;
+  x = x ^ (x >> 15);
+  x = x * 0x846CA68Bu;
+  x = x ^ (x >> 16);
+
+  // x is now a pseudo-random 32-bit integer.
+  // Map to (0,1) excluding endpoints.
+  // (x + 1) / (2^32 + 1) is strictly between 0 and 1.
+  const double denom = 4294967297.0; // 2^32 + 1
+  double u = (static_cast<double>(x) + 1.0) / denom;
+
+  return u;
+}
+
+/* ----------------------------------------------------------------------
+    Compute barrier height of tilted composite potential energy landscape
+  ------------------------------------------------------------------------- */
+
+double BondPolyuFJC::barrier(double fbond, double lamv, double kappa, double zeta)
+{
+  double lamv_crit, lamv_localmin, lamv_localmax;
+  double term1;
+  double f, umin, umax;
+
+  // Compute critical stretch
+  lamv_crit = 1 + pow(zeta / kappa , 0.5);
+
+  if (lamv >= lamv_crit) return 0;
+
+  f = fabs(fbond);
+  
+  lamv_localmin = 1 + f / kappa;
+  term1 = (pow(zeta,2.0) * (1 / f) / kappa ) ;
+  lamv_localmax = 1 + pow(term1, 1.0/3.0);
+
+  
+  // PE of local minima
+  if (lamv_localmin < lamv_crit) {
+    umin = (0.5 * kappa / zeta * pow((lamv_localmin - 1), 2.0)) - (f * lamv_localmin / zeta);
+  } else {
+    umin = (1 - zeta / (2 * kappa * pow((lamv_localmin - 1), 2.0))) - (f * lamv_localmin / zeta);
+  }
+
+  // PE of local maxima
+  if (lamv_localmax < lamv_crit) {
+    umax = (0.5 * kappa / zeta * pow((lamv_localmax - 1), 2.0)) - (f * lamv_localmax / zeta);
+  } else {
+    umax = (1 - zeta / (2 * kappa * pow((lamv_localmax - 1), 2.0))) - (f * lamv_localmax / zeta);
+  }
+
+  // if local max is above 1e20
+  //printf("lamv %f, lamv_crit %f, lamv_localmin %f, lamv_localmax %f bondforce %f, umin %f, umax %f \n", lamv, lamv_crit, lamv_localmin, lamv_localmax, fbond, umin, umax);
+  return umax - umin;
+}

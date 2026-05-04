@@ -44,7 +44,7 @@ class BondPolyuFJC : public BondPoly {
 
  protected:
   double *k0, *kappa, *fcrit, *gamma, *lamc;
-  int smooth_flag, normalize_flag, stretch_flag;
+  int smooth_flag, normalize_flag, stretch_flag, flag_distribution;
 
   int nmax;
   char *id_fix_property_bond;
@@ -53,10 +53,18 @@ class BondPolyuFJC : public BondPoly {
    int ninput;
    int *iatomfile, *jatomfile;
    double r0;
-   double lo, hi;
    double *Nfile, *bfile;
    double *N, *b;
   };
+
+  // Pointers for random numbers
+  int seed;
+  class RanMars *random;
+
+  // parameters for pdf styles
+  double lo, hi, mu, sigma, lambda, l_min, l_max, alpha, beta;
+  double b_dist;
+  char *dist_type = nullptr;
 
   int tabstyle, tablength, ntables, *tabindex;
   Table *tables;
@@ -73,6 +81,9 @@ class BondPolyuFJC : public BondPoly {
   void param_extract(Table *, char *);
   void update_table(int);
   void bond_lookup(int, int, int, double &, double &);
+  double sample_cdf(long int, int);
+  double bond_uniform(long int, int);
+  double barrier(double, double, double, double);
 };
 
 }    // namespace LAMMPS_NS
