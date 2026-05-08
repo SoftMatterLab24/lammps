@@ -624,7 +624,7 @@ void FixBondDynamic::post_integrate()
       }
 
       // Apply probability constraint
-      if (probability > p_detach) continue;
+      if (probability >= p_detach) continue;
 
       // if kd is zero but the bond isnt broken - manually skip
       if (kd == 0 && icritical != 1) continue; 
