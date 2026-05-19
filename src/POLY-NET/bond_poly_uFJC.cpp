@@ -53,7 +53,7 @@ BondPolyuFJC::BondPolyuFJC(LAMMPS *_lmp) :
   seed = 12345;
 
   nhistory = 3;
-  update_flag = 1;
+  update_flag = 0;
   id_fix_bond_history = utils::strdup("HISTORY_POLY_UFJC");
 
   single_extra = 5;
@@ -180,7 +180,12 @@ void BondPolyuFJC::store_data()
       j = atom->map(atom->bond_atom[i][m]);
       if (j == -1) error->one(FLERR, "Atom missing in BPM bond");
 
+
+      //if (setflag[type] != 0) {
       bond_lookup(type, atom->tag[i], atom->tag[j], N, b); // lookup N and b from tables
+      //} else {
+      //  continue;
+      //}
 
       delx = x[i][0] - x[j][0];
       dely = x[i][1] - x[j][1];
@@ -269,7 +274,8 @@ void BondPolyuFJC::compute(int eflag, int vflag)
     // If bond hasn't been set - should be initialized to zero - (e.g. pour, fix bond/dynamic)
     if (r0 < EPSILON || std::isnan(r0)) {
       
-      if (!flag_distribution) error->one(FLERR, "bond/distribution false for dynamic bond creation");
+      //printf("iatom %i jatom %i type %i \n",type,atom->tag[i1],atom->tag[i2]);
+      //if (!flag_distribution) error->one(FLERR, "bond/distribution false for dynamic bond creation");
       r0 = store_bond(n, i1, i2);
 
       N = bondstore[n][1];

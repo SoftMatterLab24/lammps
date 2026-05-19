@@ -465,11 +465,13 @@ double BondHybrid::single(int type, double rsq, int i, int j, double &fforce)
 void BondHybrid::copy_svector(int type)
 {
   memset(svector, 0, single_extra * sizeof(double));
-
+  
   // there is only one style in bond style hybrid for a bond type
   Bond *this_style = styles[map[type]];
 
-  for (int l = 0; this_style->single_extra; ++l) { svector[l] = this_style->svector[l]; }
+  for (int l = 0; l < this_style->single_extra; ++l) { 
+    svector[l] = this_style->svector[l]; 
+  }
 }
 
 /* ----------------------------------------------------------------------

@@ -49,7 +49,7 @@ BondPolyFJC::BondPolyFJC(LAMMPS *_lmp) :
   tables = nullptr;
 
   nhistory = 3;
-  update_flag = 1;
+  update_flag = 0;
   id_fix_bond_history = utils::strdup("HISTORY_POLY_FJC");
 
   single_extra = 3;
