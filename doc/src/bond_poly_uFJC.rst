@@ -43,7 +43,9 @@ Description
 """""""""""
 
 The *poly/uFJC* bond style computes a central force for an extensible
-freely jointed chain. For each bonded atom pair, the style reads the
+freely jointed chain, which considers both entropic elasticity
+due to chain conformational changes, and the enthalpic stretching of 
+the Kuhn segments. For each bonded atom pair, the style reads the
 chain parameters :math:`N` and :math:`b` from a table file, where
 :math:`N` is the number of Kuhn segments and :math:`b` is the Kuhn
 length. The contour length of the chain is then :math:`N b`.
@@ -61,13 +63,14 @@ The chain stretch is defined as
 
    \lambda = \frac{r}{N b}
 
-and the model computes a segmental stretch
+with the segmental stretch computed using the Bergstrom approximant and 
+following quadratic root analysis
 
 .. math::
 
    \lambda_v = \frac{\lambda + 1 + \sqrt{(\lambda - 1)^2 + 4/\kappa}}{2}
 
-where :math:`\kappa` is the extensibility parameter for the Kuhn
+where :math:`\kappa` is the nondimensional segment stiffness for the Kuhn
 segments. The entropic stretch variable used by the force law is then
 
 .. math::
@@ -141,7 +144,7 @@ the data file or restart files read by the :doc:`read_data
 <read_data>` or :doc:`read_restart <read_restart>` commands:
 
 * :math:`k_0`        (energy or force-distance units)
-* :math:`\kappa`     (dimensionless segment extensibility parameter)
+* :math:`\kappa`     (nondimensional segment stiffness)
 * :math:`f_c`        (critical bond force for the default rupture criterion)
 * :math:`\gamma`     (force/velocity units)
 * filename
