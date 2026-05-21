@@ -175,18 +175,14 @@ void BondPolyuFJC::store_data()
 
       //Skip if bond was turned off
       if (type < 0) continue;
+      if (setflag[type] == 0) continue;
 
       // map to find index n
       j = atom->map(atom->bond_atom[i][m]);
       if (j == -1) error->one(FLERR, "Atom missing in BPM bond");
 
-
-      //if (setflag[type] != 0) {
       bond_lookup(type, atom->tag[i], atom->tag[j], N, b); // lookup N and b from tables
-      //} else {
-      //  continue;
-      //}
-
+   
       delx = x[i][0] - x[j][0];
       dely = x[i][1] - x[j][1];
       delz = x[i][2] - x[j][2];
