@@ -112,8 +112,8 @@ The following coefficients must be defined for each bond type via the
 the data file or restart files read by the :doc:`read_data
 <read_data>` or :doc:`read_restart <read_restart>` commands:
 
-* :math:`k_0`        (energy or force-distance units, usually presented in units of :math:`k_bT`)
-* :math:`f_c`        (critical bond force for the default rupture criterion)
+* :math:`k_0`        (force*distance units)
+* :math:`f_c`        (force units)
 * :math:`\gamma`     (force/velocity units)
 * filename
 * keyword
