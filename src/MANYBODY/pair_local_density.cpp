@@ -59,6 +59,7 @@ PairLocalDensity::PairLocalDensity(LAMMPS *lmp) : Pair(lmp)
   restartinfo = 0;
   one_coeff = 1;
   single_enable = 1;
+  normalize_flag = 0;
 
   // stuff read from tabulated file
   nLD = 0;
@@ -86,6 +87,9 @@ PairLocalDensity::PairLocalDensity(LAMMPS *lmp) : Pair(lmp)
   fp = nullptr;
   localrho = nullptr;
   inter_mol_flag = 0;
+
+  //normalization factor
+  phi_norm = 1;
 
   // comm sizes needed by this pair style will be set when reading the potential file
   comm_forward = comm_reverse = 0;
@@ -217,13 +221,13 @@ void PairLocalDensity::compute(int eflag, int vflag)
 
       for (k = 0; k < nLD; k++) {
         if (rsq < lowercutsq[k]) {
-             phi = 1.0/0.47;
+             phi = 1.0/phi_norm; // phi_norm
         }
           else if (rsq > uppercutsq[k]) {
-             phi = 0.0/0.47;
+             phi = 0.0/phi_norm;
         }
           else {
-             phi = (c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq)))/0.47;
+             phi = (c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq)))/phi_norm;
             // phi = 1.0;
         }
         localrho[k][i] += (phi * b[k][jtype]);
@@ -329,7 +333,7 @@ void PairLocalDensity::compute(int eflag, int vflag)
         rsqinv = 1.0/rsq;
         for (k = 0; k < nLD; k++) {
             if (rsq >= lowercutsq[k] && rsq < uppercutsq[k]) {
-               dphi = rsq * (2.0*c2[k] + rsq * (4.0*c4[k] + 6.0*c6[k]*rsq));
+               dphi = rsq * (2.0*c2[k] + rsq * (4.0*c4[k] + 6.0*c6[k]*rsq))/phi_norm;
               //  dphi = -1.0;
                fpair += -(a[k][itype]*b[k][jtype]*fp[k][i] + a[k][jtype]*b[k][itype]*fp[k][j]) * dphi;
             }
@@ -382,9 +386,17 @@ void PairLocalDensity::allocate()
    global settings
 ------------------------------------------------------------------------- */
 
-void PairLocalDensity::settings(int narg, char ** /* arg */)
+void PairLocalDensity::settings(int narg, char **arg)
 {
-  if (narg > 0) error->all(FLERR,"Illegal pair_style command");
+  if (narg > 2) error->all(FLERR,"Illegal pair_style command");
+
+  int iarg = 0;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "normalize") == 0) {
+      normalize_flag = utils::logical(FLERR, arg[iarg+1], false, lmp);
+      iarg += 2;
+    }
+  }
 }
 
 /* ----------------------------------------------------------------------
@@ -397,18 +409,34 @@ void PairLocalDensity::coeff(int narg, char **arg)
   int i, j;
   if (!allocated) allocate();
 
-  if (narg != 3 && narg != 5) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (narg < 3 || narg > 6) error->all(FLERR,"Incorrect args for pair coefficients");
 
   // ensure I,J args are * *
 
   if (strcmp(arg[0],"*") != 0 || strcmp(arg[1],"*") != 0)
     error->all(FLERR,"Incorrect args for pair coefficients");
 
+  // optional args after filename: mol <bool> and/or phi_norm when normalize_flag is true
+
   inter_mol_flag = 0;
-  if (narg == 5) {
-    if (strcmp(arg[3], "mol") != 0)
-      error->all(FLERR, "Unknown pair_coeff option for pair_style local/density");
-    inter_mol_flag = utils::logical(FLERR, arg[4], false, lmp);
+  phi_norm = 1.0;
+  bool phi_norm_set = false;
+  int iarg = 3;
+  while (iarg < narg) {
+    if (strcmp(arg[iarg], "mol") == 0) {
+      if (iarg + 1 >= narg)
+        error->all(FLERR, "Missing mol flag for pair_coeff option for pair_style local/density");
+      inter_mol_flag = utils::logical(FLERR, arg[iarg+1], false, lmp);
+      iarg += 2;
+    } else {
+      if (!normalize_flag)
+        error->all(FLERR, "phi_norm provided but pair_style local/density normalize flag is not enabled");
+      if (phi_norm_set)
+        error->all(FLERR, "Multiple phi_norm values provided for pair_style local/density");
+      phi_norm = utils::numeric(FLERR, arg[iarg], false, lmp);
+      phi_norm_set = true;
+      iarg += 1;
+    }
   }
 
   // parse LD file
@@ -497,13 +525,13 @@ double PairLocalDensity::single(int i, int j, int itype, int jtype,
     rsqinv = 1.0/rsq;
     for (k = 0; k < nLD; k++) {
         if (rsq < lowercutsq[k]) {
-             phi = 1.0/0.47;
+             phi = 1.0/phi_norm;
         }
         else if (rsq > uppercutsq[k]) {
-             phi = 0.0/0.47;
+             phi = 0.0/phi_norm;
         }
         else {
-             phi = (c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq)))/0.47;
+             phi = (c0[k] + rsq * (c2[k] + rsq * (c4[k] + c6[k]*rsq)))/phi_norm;
             // phi = 1.0;
         }
         LD[k][1] += (phi * b[k][jtype]);
@@ -547,7 +575,7 @@ double PairLocalDensity::single(int i, int j, int itype, int jtype,
            dphi = 0.0;
         }
         else {
-           dphi = rsq * (2.0*c2[k] + rsq * (4.0*c4[k] + 6.0*c6[k]*rsq));
+           dphi = rsq * (2.0*c2[k] + rsq * (4.0*c4[k] + 6.0*c6[k]*rsq))/phi_norm;
           // dphi = -1.0;
         }
         if (apply_force)

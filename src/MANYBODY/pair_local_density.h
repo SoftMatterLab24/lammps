@@ -63,10 +63,13 @@ class PairLocalDensity : public Pair {
   double cutmax;            // max cutoff for all elements
   double cutforcesq;        // square of global upper cutoff
   int inter_mol_flag;       // only apply forces between different molecule IDs
+  int normalize_flag;       // whether to normalize the potential by phi
+  double phi_norm;          // normalization factor
 
   int nmax;             // max size of per-atom arrays
   double **localrho;    // per-atom LD
   double **fp;          // per-atom LD potential function derivative
+  
 
   void allocate();
 
