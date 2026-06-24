@@ -43,6 +43,7 @@ BondPolyFJC::BondPolyFJC(LAMMPS *_lmp) :
   smooth_flag = 1;
   stretch_flag = 0;
   normalize_flag = 0;
+  gauss_flag = 0;
   writedata = 0;
 
   ntables = 0;
@@ -282,16 +283,24 @@ void BondPolyFJC::compute(int eflag, int vflag)
     }
 
     // Calculate bond force
-
-    numer = lam*(3.0 - pow(lam,2.0));
-    denom = 1.0 - pow(lam,2.0);
-    fbond = -k0[type]*numer/denom/b;
+    if (gauss_flag) {
+      numer = 3*lam;
+      fbond = -k0[type]*numer/b;
+    } else {
+      numer = lam*(3.0 - pow(lam,2.0));
+      denom = 1.0 - pow(lam,2.0);
+      fbond = -k0[type]*numer/denom/b;
+    }
 
     // Calculate energy 
-
-    term1 = pow(lam,2.0)/2.0;
-    term2 = log(1.0 - pow(lam,2.0));
-    ebond = N*(term1 - term2);
+    if (gauss_flag) {
+      term1 = pow(lam,2.0)/2.0;
+      ebond = 3*term1*k0[type]*N;
+    } else {
+      term1 = pow(lam,2.0)/2.0;
+      term2 = log(1.0 - pow(lam,2.0));
+      ebond = N*(term1 - term2);
+    }
 
     //bond break criterion //disable for nonlinear //disable if stretch criterion is used
     if ((fabs(fbond) > fcrit[type]) && break_flag && !stretch_flag) {  
@@ -436,6 +445,10 @@ void BondPolyFJC::settings(int narg, char **arg)
       if (iarg + 1 > narg) error->all(FLERR, "Illegal bond poly/FJC command, missing option for normalize");
       normalize_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
       i += 1;
+    } else if (strcmp(arg[iarg], "gauss") == 0) {
+      if (iarg + 1 > narg) error->all(FLERR, "Illegal bond poly/FJC command, missing option for gauss");
+      gauss_flag = utils::logical(FLERR, arg[iarg + 1], false, lmp);
+      i += 1;
     } else {
       error->all(FLERR, "Illegal bond poly/FJC command, invalid argument {}", arg[iarg]);
     }
@@ -554,6 +567,7 @@ void BondPolyFJC::write_restart_settings(FILE *fp)
   fwrite(&smooth_flag, sizeof(int), 1, fp);
   fwrite(&normalize_flag, sizeof(int), 1, fp);
   fwrite(&stretch_flag, sizeof(int), 1, fp);
+  fwrite(&gauss_flag, sizeof(int), 1, fp);
 
 }
 
@@ -567,11 +581,13 @@ void BondPolyFJC::read_restart_settings(FILE *fp)
     utils::sfread(FLERR, &smooth_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &normalize_flag, sizeof(int), 1, fp, nullptr, error);
     utils::sfread(FLERR, &stretch_flag, sizeof(int), 1, fp, nullptr, error);
+    utils::sfread(FLERR, &gauss_flag, sizeof(int), 1, fp, nullptr, error);
   }
 
   MPI_Bcast(&smooth_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&normalize_flag, 1, MPI_INT, 0, world);
   MPI_Bcast(&stretch_flag, 1, MPI_INT, 0, world);
+  MPI_Bcast(&gauss_flag, 1, MPI_INT, 0, world);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -620,10 +636,15 @@ double BondPolyFJC::single(int type, double rsq, int i, int j, double &fforce)
 
   Nb = N * b;
   lam = r/Nb;
-  numer = lam*(3.0 - pow(lam,2.0));
-  denom = 1.0 - pow(lam,2.0);
 
-  fforce = -k0[type]*numer/denom/b;
+  if (gauss_flag) {
+    numer = 3*lam;
+    fforce = -k0[type]*numer/b;
+  } else {
+    numer = lam*(3.0 - pow(lam,2.0));
+    denom = 1.0 - pow(lam,2.0);
+    fforce = -k0[type]*numer/denom/b;
+  }
 
   double **x = atom->x;
   double **v = atom->v;
@@ -650,10 +671,16 @@ double BondPolyFJC::single(int type, double rsq, int i, int j, double &fforce)
     fforce = 0.0;
     return 0.0;
   }
-
-  term1 = pow(lam,2.0)/2.0;
-  term2 = log(1.0 - pow(lam,2.0));
-  double eng = N*(term1 - term2);
+ 
+  double eng = 0.0;
+  if (gauss_flag) {
+    term1 = pow(lam,2.0)/2.0;
+    eng = 3*term1*k0[type]*N;
+  } else {
+    term1 = pow(lam,2.0)/2.0;
+    term2 = log(1.0 - pow(lam,2.0));
+    eng = N*(term1 - term2);
+  }
 
   // set single_extra quantities
 

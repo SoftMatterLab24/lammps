@@ -44,7 +44,7 @@ class BondPolyFJC : public BondPoly {
 
  protected:
   double *k0, *fcrit, *gamma, *lamc;
-  int smooth_flag, normalize_flag, stretch_flag;
+  int smooth_flag, normalize_flag, stretch_flag, gauss_flag;
 
   int nmax;
   char *id_fix_property_bond;
